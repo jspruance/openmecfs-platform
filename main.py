@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import papers, datasets, stats, cache
+from routes import papers, datasets, stats, cache, semantic
 
 app = FastAPI(
     title="Open ME/CFS API",
@@ -23,6 +23,7 @@ app.include_router(papers.router)
 app.include_router(datasets.router)
 app.include_router(stats.router)
 app.include_router(cache.router)
+app.include_router(semantic.router)
 
 
 @app.get("/")
