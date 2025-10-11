@@ -1,0 +1,22 @@
+# Core framework
+fastapi==0.115.0
+uvicorn==0.30.1
+
+# Data / utilities
+pydantic>=2.8.0
+python-dotenv>=1.0.1
+
+# Database / Supabase integration (for Phase 4)
+supabase>=2.4.0
+postgrest>=0.13.0
+gotrue>=2.1.0
+
+# AI / summarization utils (optional, aligns with summarizer phase)
+transformers>=4.44.0
+torch>=2.4.0
+tqdm>=4.66.0
+
+# Development tools
+pytest>=8.3.0
+black>=24.8.0
+flake8>=7.1.0

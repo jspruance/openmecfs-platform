@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# Logs and caches
+*.log
+*.tmp
+*.cache
+__pycache__/
+
+# Data and model outputs
+data/*.json
+!data/.gitkeep  # keep empty folder structure if desired
+*.csv
+*.pkl
+*.pt
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Environment variables
+.env
+*.env
+
+# Node / frontend (for future Next.js integration)
+node_modules/
+.next/
+dist/
+build/
