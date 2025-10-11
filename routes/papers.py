@@ -34,8 +34,11 @@ def list_papers(
 def meta():
     """Return most recent dataset metadata"""
     meta = get_metadata()
-    if not meta:
+
+    # If empty dict or None, return a 'message'
+    if not meta or not isinstance(meta, dict) or len(meta.keys()) == 0:
         return {"message": "No dataset metadata found. Try re-importing."}
+
     return meta
 
 
