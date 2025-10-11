@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 from supabase import create_client, Client
 from dotenv import load_dotenv
+from utils.db import _search_cache
 
 # Load credentials from .env
 load_dotenv()
@@ -70,4 +71,7 @@ for p in papers:
     except Exception as e:
         print(f"❌ Error importing PMID {p.get('pmid')}: {e}")
 
+# After successful import
+_search_cache.clear()
+print("🧹 Cache cleared after import.")
 print("✅ Import complete.")
