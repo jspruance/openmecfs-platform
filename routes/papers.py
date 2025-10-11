@@ -75,8 +75,16 @@ def suggest(q: str, limit: int = 5):
 #  🧠 3️⃣ Semantic Search (OpenAI + pgvector)
 # ------------------------------------------------------------
 
-_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 _MODEL = "text-embedding-3-small"
+
+
+def get_openai_client():
+    """Safely return OpenAI client or None if API key missing."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("⚠️ Warning: OPENAI_API_KEY not set. Semantic search disabled.")
+        return None
+    return OpenAI(api_key=api_key)
 
 
 @router.get("/semantic")
@@ -85,6 +93,12 @@ def semantic_search(
     limit: int = Query(5, ge=1, le=20),
 ):
     """Semantic similarity search using OpenAI embeddings + Supabase RPC"""
+    _client = get_openai_client()
+
+    # ✅ This ensures CI/tests don't fail when API key is missing
+    if not _client:
+        return {"message": "Semantic search unavailable in this environment."}
+
     try:
         # Create query embedding
         embedding = _client.embeddings.create(
