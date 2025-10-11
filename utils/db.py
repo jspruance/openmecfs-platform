@@ -49,70 +49,44 @@ def get_paper_by_pmid(pmid: str):
 
 
 @cached(_search_cache)
-def search_papers(term: str, limit: int = 10, author: str | None = None, year: int | None = None):
-    """
-    Production-grade full-text search for Open ME/CFS.
-    Searches title, abstract, and authors_text (flattened).
-    """
-    query = supabase.table("papers").select("*")
+def search_papers(q=None, limit=10, author=None, year=None):
+    papers = get_papers(limit=1000)
 
-    # 🔍 Flexible full-text match
-    if term:
-        pattern = f"%{term}%"
-        query = query.or_(
-            f"title.ilike.{pattern},abstract.ilike.{pattern},authors_text.ilike.{pattern}"
-        )
+    if not q:
+        return papers[:limit]
 
-    # 👤 Optional author filter
+    q_lower = q.lower()
+
+    results = []
+    for p in papers:
+        title = p.get("title", "").lower()
+        authors = p.get("authors", [])
+        abstract = p.get("abstract", "").lower()
+
+        # authors might be a list, so normalize to one string
+        if isinstance(authors, list):
+            authors_str = " ".join(authors).lower()
+        else:
+            authors_str = str(authors).lower()
+
+        if (
+            q_lower in title
+            or q_lower in authors_str
+            or q_lower in abstract
+        ):
+            results.append(p)
+
+    # Optional filters
     if author:
-        query = query.ilike("authors_text", f"%{author}%")
+        results = [
+            p for p in results
+            if author.lower() in " ".join(p.get("authors", [])).lower()
+        ]
 
-    # 📅 Optional year filter
     if year:
-        query = query.eq("year", year)
+        results = [p for p in results if str(p.get("year")) == str(year)]
 
-    query = query.limit(limit)
-    results = query.execute().data
-
-    # 🧠 Simple ranking
-    if results and term:
-        results.sort(
-            key=lambda p: (
-                term.lower() in p.get("title", "").lower(),
-                term.lower() in p.get("abstract", "").lower(),
-                term.lower() in p.get("authors_text", "").lower(),
-            ),
-            reverse=True,
-        )
-
-    return results
-
-
-def get_metadata():
-    """Fetch latest dataset metadata"""
-    result = (
-        supabase.table("datasets")
-        .select("*")
-        .order("imported_at", desc=True)
-        .limit(1)
-        .execute()
-        .data
-    )
-    if not result:
-        return None
-    return result[0]
-
-
-def get_datasets():
-    """Return all dataset imports, newest first"""
-    result = (
-        supabase.table("datasets")
-        .select("*")
-        .order("imported_at", desc=True)
-        .execute()
-        .data
-    )
-    return result or []
+    return results[:limit]
 
 
 # ------------------------------------------------------------
