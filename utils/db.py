@@ -33,7 +33,36 @@ def get_papers(limit: int = 10, offset: int = 0, sort: str = "pmid", order: str 
     query = supabase.table("papers").select(
         "*").range(offset, offset + limit - 1)
     query = query.order(sort, desc=(order == "desc"))
-    return query.execute().data
+    data = query.execute().data or []
+
+    def infer_year(paper):
+        # Try direct keys first
+        for key in ("year", "publication_year", "date", "published", "pub_date"):
+            if paper.get(key):
+                try:
+                    # Handle full dates like "2024-03-12"
+                    return int(str(paper[key])[:4])
+                except Exception:
+                    pass
+
+        # Fallback: check inside metadata (if nested)
+        metadata = paper.get("metadata") or {}
+        for key in ("year", "publication_year", "date"):
+            if metadata.get(key):
+                try:
+                    return int(str(metadata[key])[:4])
+                except Exception:
+                    pass
+
+        return None
+
+    return [
+        {
+            **p,
+            "year": infer_year(p),
+        }
+        for p in data
+    ]
 
 
 def get_paper_by_pmid(pmid: str):
