@@ -38,6 +38,8 @@ data/*.json
 # Environment variables
 .env
 *.env
+!.env.example
+
 
 # Node / frontend (for future Next.js integration)
 node_modules/
