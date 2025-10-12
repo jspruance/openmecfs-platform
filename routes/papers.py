@@ -1,76 +1,77 @@
-from fastapi import APIRouter, HTTPException, Query
-from utils.loader import load_data
-from typing import List
+# routes/papers.py
+from fastapi import APIRouter, HTTPException, Query, Depends
+from sqlalchemy.orm import Session
+from database import SessionLocal
+from models import Paper
+from typing import Optional
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 
-# 🧩 Load dataset once at startup
-papers = load_data()
+# Dependency: open a DB session per request
 
 
-# 🧠 List Papers (with filters, pagination, sorting)
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# 🧠 List Papers (filters, pagination, sorting)
 @router.get("/")
 def list_papers(
+    db: Session = Depends(get_db),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    sort: str = Query("pmid", description="Sort by pmid, title, or author"),
-    order: str = Query("asc", description="asc or desc"),
-    author: str | None = Query(None, description="Filter by author substring"),
-    year: int | None = Query(None, description="Filter by publication year"),
+    sort: str = Query("year", description="Sort by pmid, title, or year"),
+    order: str = Query("desc", description="asc or desc"),
+    author: Optional[str] = Query(
+        None, description="Filter by author substring"),
+    year: Optional[int] = Query(
+        None, description="Filter by publication year"),
 ):
-    # Defensive check
-    if not papers:
-        return []
+    query = db.query(Paper)
 
-    results = papers
-
-    # Optional filter by author substring
     if author:
-        results = [
-            p for p in results if any(author.lower() in a.lower() for a in p.get("authors", []))
-        ]
-
-    # Optional filter by year
+        query = query.filter(Paper.authors.ilike(f"%{author}%"))
     if year:
-        results = [p for p in results if p.get("year") == year]
+        query = query.filter(Paper.year == year)
 
-    # Sorting
-    reverse = order.lower() == "desc"
-    try:
-        results = sorted(results, key=lambda x: str(
-            x.get(sort, "")).lower(), reverse=reverse)
-    except KeyError:
-        pass
+    sort_field = getattr(Paper, sort, Paper.year)
+    query = query.order_by(
+        sort_field.desc() if order.lower() == "desc" else sort_field.asc()
+    )
 
-    # Pagination
-    start = (page - 1) * limit
-    end = start + limit
-    return results[start:end]
+    results = query.offset((page - 1) * limit).limit(limit).all()
+    return results
 
 
 # 🔍 Search Endpoint
 @router.get("/search")
-def search_papers(q: str = Query(..., description="Full-text search")):
-    q_lower = q.lower()
-    matched = [
-        p
-        for p in papers
-        if q_lower in p.get("title", "").lower()
-        or q_lower in p.get("abstract", "").lower()
-        or q_lower in " ".join(p.get("authors", [])).lower()
-    ]
-    return matched[:20]
+def search_papers(
+    q: str = Query(..., description="Full-text search"),
+    db: Session = Depends(get_db),
+    limit: int = Query(20, ge=1, le=100),
+):
+    search = f"%{q.lower()}%"
+    results = (
+        db.query(Paper)
+        .filter(
+            (Paper.title.ilike(search))
+            | (Paper.abstract.ilike(search))
+            | (Paper.authors.ilike(search))
+        )
+        .limit(limit)
+        .all()
+    )
+    return results
 
 
 # 📄 Single Paper by PMID
 @router.get("/{pmid}")
-def get_paper(pmid: str):
-    """Return full record for one paper, including summaries and abstract."""
-    if not papers:
-        raise HTTPException(status_code=500, detail="No papers loaded")
-
-    for paper in papers:
-        if str(paper.get("pmid")) == str(pmid):
-            return paper
-
-    raise HTTPException(status_code=404, detail=f"Paper {pmid} not found")
+def get_paper(pmid: str, db: Session = Depends(get_db)):
+    paper = db.query(Paper).filter(Paper.pmid == pmid).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail=f"Paper {pmid} not found")
+    return paper
