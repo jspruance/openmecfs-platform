@@ -48,7 +48,7 @@ openmecfs-platform/
 │   └── test_papers_api.py      # Pytest API regression suite
 │
 ├── data/
-│   └── mecfs_papers_summarized_2025-10-11.json
+│   └── mecfs_papers_summarized_2025-10-12.json
 │
 ├── .env                        # Secrets (SUPABASE_URL, OPENAI_API_KEY, etc.)
 └── requirements.txt            # Python dependencies

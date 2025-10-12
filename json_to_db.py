@@ -22,7 +22,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 # Path to your summarized file
-INPUT_PATH = "data/mecfs_papers_summarized_2025-10-11.json"
+INPUT_PATH = "data/mecfs_papers_summarized_2025-10-12.json"
 
 with open(INPUT_PATH, "r", encoding="utf-8") as f:
     data = json.load(f)

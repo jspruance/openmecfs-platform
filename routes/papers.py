@@ -1,137 +1,76 @@
-# routes/papers.py
 from fastapi import APIRouter, HTTPException, Query
-from utils.db import (
-    get_papers,
-    get_paper_by_pmid,
-    search_papers,
-    get_metadata,
-    supabase,
-)
-from openai import OpenAI
-import os
+from utils.loader import load_data
+from typing import List
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 
-# ------------------------------------------------------------
-#  📘 1️⃣ List & Metadata Endpoints
-# ------------------------------------------------------------
+# 🧩 Load dataset once at startup
+papers = load_data()
 
 
+# 🧠 List Papers (with filters, pagination, sorting)
 @router.get("/")
 def list_papers(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    sort: str = Query("pmid"),
-    order: str = Query("asc"),
+    sort: str = Query("pmid", description="Sort by pmid, title, or author"),
+    order: str = Query("asc", description="asc or desc"),
+    author: str | None = Query(None, description="Filter by author substring"),
+    year: int | None = Query(None, description="Filter by publication year"),
 ):
-    """Return paginated list of papers"""
-    offset = (page - 1) * limit
-    results = get_papers(limit=limit, offset=offset, sort=sort, order=order)
-    return {"page": page, "limit": limit, "count": len(results), "results": results}
+    # Defensive check
+    if not papers:
+        return []
 
+    results = papers
 
-@router.get("/meta")
-def meta():
-    """Return most recent dataset metadata"""
-    meta = get_metadata()
+    # Optional filter by author substring
+    if author:
+        results = [
+            p for p in results if any(author.lower() in a.lower() for a in p.get("authors", []))
+        ]
 
-    # If empty dict or None, return a 'message'
-    if not meta or not isinstance(meta, dict) or len(meta.keys()) == 0:
-        return {"message": "No dataset metadata found. Try re-importing."}
+    # Optional filter by year
+    if year:
+        results = [p for p in results if p.get("year") == year]
 
-    return meta
-
-
-# ------------------------------------------------------------
-#  🔍 2️⃣ Search Endpoints
-# ------------------------------------------------------------
-
-@router.get("/search")
-def search(
-    q: str | None = None,
-    limit: int = 10,
-    author: str | None = None,
-    year: int | None = None,
-):
-    """Full-text search with optional author/year filters"""
-    results = search_papers(q, limit, author, year)
-    if not results:
-        return {"message": f"No results found for '{q or 'query'}'."}
-
-    return {
-        "query": q,
-        "filters": {"author": author, "year": year},
-        "count": len(results),
-        "results": results,
-    }
-
-
-@router.get("/suggest")
-def suggest(q: str, limit: int = 5):
-    """Autocomplete suggestions (titles only)"""
-    results = search_papers(q, limit)
-    suggestions = [{"pmid": r["pmid"], "title": r["title"]} for r in results]
-    return {"query": q, "suggestions": suggestions}
-
-
-# ------------------------------------------------------------
-#  🧠 3️⃣ Semantic Search (OpenAI + pgvector)
-# ------------------------------------------------------------
-
-_MODEL = "text-embedding-3-small"
-
-
-def get_openai_client():
-    """Safely return OpenAI client or None if API key missing."""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("⚠️ Warning: OPENAI_API_KEY not set. Semantic search disabled.")
-        return None
-    return OpenAI(api_key=api_key)
-
-
-@router.get("/semantic")
-def semantic_search(
-    q: str = Query(..., description="Semantic search query"),
-    limit: int = Query(5, ge=1, le=20),
-):
-    """Semantic similarity search using OpenAI embeddings + Supabase RPC"""
-    _client = get_openai_client()
-
-    # ✅ This ensures CI/tests don't fail when API key is missing
-    if not _client:
-        return {"message": "Semantic search unavailable in this environment."}
-
+    # Sorting
+    reverse = order.lower() == "desc"
     try:
-        # Create query embedding
-        embedding = _client.embeddings.create(
-            input=q, model=_MODEL
-        ).data[0].embedding
+        results = sorted(results, key=lambda x: str(
+            x.get(sort, "")).lower(), reverse=reverse)
+    except KeyError:
+        pass
 
-        # Query pgvector via RPC
-        res = supabase.rpc(
-            "match_papers", {
-                "query_embedding": embedding, "match_count": limit}
-        ).execute()
-
-        return {
-            "query": q,
-            "count": len(res.data or []),
-            "results": res.data or [],
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Pagination
+    start = (page - 1) * limit
+    end = start + limit
+    return results[start:end]
 
 
-# ------------------------------------------------------------
-#  📄 4️⃣ Single Paper (keep LAST to avoid route collisions)
-# ------------------------------------------------------------
+# 🔍 Search Endpoint
+@router.get("/search")
+def search_papers(q: str = Query(..., description="Full-text search")):
+    q_lower = q.lower()
+    matched = [
+        p
+        for p in papers
+        if q_lower in p.get("title", "").lower()
+        or q_lower in p.get("abstract", "").lower()
+        or q_lower in " ".join(p.get("authors", [])).lower()
+    ]
+    return matched[:20]
 
+
+# 📄 Single Paper by PMID
 @router.get("/{pmid}")
 def get_paper(pmid: str):
-    """Fetch single paper by PMID"""
-    result = get_paper_by_pmid(pmid)
-    if not result:
-        raise HTTPException(status_code=404, detail="Paper not found")
-    return result
+    """Return full record for one paper, including summaries and abstract."""
+    if not papers:
+        raise HTTPException(status_code=500, detail="No papers loaded")
+
+    for paper in papers:
+        if str(paper.get("pmid")) == str(pmid):
+            return paper
+
+    raise HTTPException(status_code=404, detail=f"Paper {pmid} not found")

@@ -28,33 +28,35 @@ def infer_year(paper: dict) -> int | None:
 
 
 def load_data(filename: str | None = None):
-    """Load summarized ME/CFS papers from JSON and normalize key fields.
+    """Load ME/CFS papers from JSON and normalize key fields.
+
+    Priority:
+      1. mecfs_papers_summarized_*.json (latest summarized dataset)
+      2. raw_papers.json (fallback if no summarized file)
 
     Adds:
       - `year`: inferred publication year if available
       - `imported_at`: timestamp of load
     """
     try:
-        if not filename:
-            files = sorted(
-                DATA_PATH.glob("mecfs_papers_summarized_*.json"), reverse=True
-            )
-            if not files:
-                print(
-                    "⚠️  No summarized dataset found. The API will start with empty data."
-                )
-                return []
+        if filename:
+            path = Path(filename)
+        else:
+            # Look for latest summarized dataset first
+            summarized_files = sorted(DATA_PATH.glob(
+                "mecfs_papers_summarized_*.json"), reverse=True)
+            if summarized_files:
+                path = summarized_files[0]
+            else:
+                # Fallback to raw dataset
+                path = DATA_PATH / "raw_papers.json"
 
-            filename = files[0]
-
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         # Handle both array and wrapped formats
-        if isinstance(data, dict) and "papers" in data:
-            papers = data["papers"]
-        else:
-            papers = data
+        papers = data["papers"] if isinstance(
+            data, dict) and "papers" in data else data
 
         normalized = []
         for p in papers:
@@ -67,7 +69,8 @@ def load_data(filename: str | None = None):
                 }
             )
 
-        print(f"✅ Loaded {len(normalized)} papers with normalized year field.")
+        print(
+            f"✅ Loaded {len(normalized)} papers from {path.name} with normalized year field.")
         return normalized
 
     except Exception as e:
