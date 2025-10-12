@@ -14,4 +14,6 @@ class Paper(Base):
     year = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True))
     authors_text = Column(Text)
-    embedding = Column(JSONB)  # or change to ARRAY(Float) if vector type
+    embedding = Column(JSONB)  # or ARRAY(Float) if you're using pgvector
+    technical_summary = Column(Text, nullable=True)
+    patient_summary = Column(Text, nullable=True)
