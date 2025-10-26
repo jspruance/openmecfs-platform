@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import papers, datasets, stats, cache, semantic
+from routes import papers, datasets, stats, cache, semantic, clusters, papers_supabase
 
 # ------------------------------------------------------------
 # 🚀 App Configuration
@@ -36,6 +36,8 @@ app.include_router(datasets.router)
 app.include_router(stats.router)
 app.include_router(cache.router)
 app.include_router(semantic.router)
+app.include_router(clusters.router)
+app.include_router(papers_supabase.router)
 
 # ------------------------------------------------------------
 # 🔍 Root Endpoint

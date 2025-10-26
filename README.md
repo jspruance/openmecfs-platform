@@ -1,8 +1,8 @@
-# 🌍 Open ME/CFS API
+# 🌍 Open ME/CFS API (AI Cure Platform)
 
 **Open ME/CFS** is an open-source initiative combining **AI, open data, and community collaboration** to accelerate research and awareness around **Myalgic Encephalomyelitis / Chronic Fatigue Syndrome (ME/CFS)**.
 
-This repository contains the **FastAPI backend** that powers the Open ME/CFS data platform — serving AI-summarized, vector-searchable research papers as structured, queryable data.
+This repository hosts the **FastAPI backend** powering the Open ME/CFS platform — serving AI-summarized, vector-searchable research papers and biological subtype metadata through Supabase.
 
 ---
 
@@ -10,21 +10,21 @@ This repository contains the **FastAPI backend** that powers the Open ME/CFS dat
 
 > Democratize ME/CFS research by connecting patients, advocates, and researchers through open science and accessible data.
 
-The API lets anyone **search**, **filter**, and **analyze** ME/CFS research using both keyword and semantic (AI-embedding) search — no model setup required.
+The API allows anyone to **search**, **filter**, and **analyze** ME/CFS research using both traditional keywords and AI-powered semantic search — no local model setup required.
 
 ---
 
 ## ⚙️ Tech Stack
 
-| Layer                  | Tools / Frameworks                   | Purpose                                |
-| ---------------------- | ------------------------------------ | -------------------------------------- |
-| **Backend**            | FastAPI + Uvicorn                    | REST API server                        |
-| **Database**           | Supabase (PostgreSQL + pgvector)     | Paper storage + semantic embeddings    |
-| **AI Summaries**       | Hugging Face Transformers (BART, T5) | Technical + patient-friendly summaries |
-| **Semantic Search**    | OpenAI Embeddings API                | Vector search & hybrid ranking         |
-| **Caching / Stats**    | In-memory cache + FastAPI routes     | Quick response + metrics               |
-| **Testing / CI**       | Pytest + GitHub Actions              | Regression tests on commit             |
-| **Frontend (Planned)** | Next.js / React                      | Research & community dashboard         |
+| Layer               | Tools / Frameworks                   | Purpose                                 |
+| ------------------- | ------------------------------------ | --------------------------------------- |
+| **Backend**         | FastAPI + Uvicorn                    | REST API server                         |
+| **Database**        | Supabase (PostgreSQL + pgvector)     | Storage of papers, embeddings, clusters |
+| **AI Summaries**    | Hugging Face Transformers (BART, T5) | Technical + patient-friendly summaries  |
+| **Semantic Search** | OpenAI Embeddings API                | Vector similarity & hybrid ranking      |
+| **Clustering**      | UMAP + HDBSCAN + GPT Labeling        | AI Cure biological subtype engine       |
+| **Caching / Stats** | Cachetools TTLCache                  | Lightweight in-memory cache             |
+| **Frontend (Next)** | Next.js / React                      | Research Explorer UI (Phase 4C)         |
 
 ---
 
@@ -33,25 +33,23 @@ The API lets anyone **search**, **filter**, and **analyze** ME/CFS research usin
 ```
 openmecfs-platform/
 │
-├── main.py                     # FastAPI entry point
+├── main.py                        # FastAPI entry point + routers
 ├── routes/
-│   ├── papers.py               # Paper endpoints (search, semantic, hybrid)
-│   ├── stats.py                # Dataset stats & cache status
-│   └── cache.py                # Cache control endpoints
+│   ├── papers.py                  # SQLAlchemy-based legacy paper API
+│   ├── papers_supabase.py         # Supabase-powered paper endpoint (/papers-sb)
+│   ├── clusters.py                # Biological subtype metadata (/clusters)
+│   ├── stats.py                   # Dataset stats
+│   ├── cache.py                   # Cache control
+│   └── semantic.py                # Semantic + hybrid search (WIP)
 │
 ├── utils/
-│   ├── db.py                   # Supabase client + query helpers
-│   ├── cache.py                # In-memory TTL cache
-│   └── generate_embeddings.py  # One-time embedding generator
+│   ├── db.py                      # Supabase client + helper functions
+│   └── cache.py                   # In-memory TTL cache
 │
-├── tests/
-│   └── test_papers_api.py      # Pytest API regression suite
-│
-├── data/
-│   └── mecfs_papers_summarized_2025-10-12.json
-│
-├── .env                        # Secrets (SUPABASE_URL, OPENAI_API_KEY, etc.)
-└── requirements.txt            # Python dependencies
+├── database.py                    # SQLAlchemy engine for optional local use
+├── tests/                         # Pytest regression tests
+├── .env                           # Environment secrets
+└── requirements.txt               # Dependencies
 ```
 
 ---
@@ -62,7 +60,7 @@ openmecfs-platform/
 
 ```bash
 python -m venv venv
-source venv/bin/activate        # Mac/Linux
+source venv/bin/activate      # Mac/Linux
 venv\Scripts\activate         # Windows
 ```
 
@@ -72,95 +70,88 @@ venv\Scripts\activate         # Windows
 pip install -r requirements.txt
 ```
 
-If setting up fresh:
+If missing, reinstall base stack:
 
 ```bash
-pip install fastapi uvicorn supabase openai python-dotenv pytest
+pip install "fastapi>=0.115,<0.116" "uvicorn[standard]>=0.30,<0.31"     "supabase>=2.3,<3.0" "psycopg[binary]>=3.1,<4.0"     "python-dotenv>=1.0,<2.0" "sqlalchemy>=2.0,<3.0"     "cachetools>=5.3,<6.0"
 ```
 
-### 3️⃣ Environment variables (`.env`)
+### 3️⃣ Environment Variables (`.env`)
 
 ```env
 SUPABASE_URL=https://<your-project>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 OPENAI_API_KEY=sk-xxxx
+DATABASE_URL=postgresql+psycopg://postgres:<password>@db.<project>.supabase.co:5432/postgres
 ```
 
-### 4️⃣ Run API locally
+### 4️⃣ Run Locally
 
 ```bash
 uvicorn main:app --reload
 ```
 
-Then open → [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+→ Open **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)** for interactive OpenAPI docs.
 
 ---
 
 ## 🔗 Key Endpoints
 
-| Endpoint              | Description                                                      |
-| --------------------- | ---------------------------------------------------------------- |
-| `/papers`             | Paginated list of papers                                         |
-| `/papers/{pmid}`      | Single paper + summaries                                         |
-| `/papers/search?q=`   | Keyword search with author/year filters                          |
-| `/papers/suggest?q=`  | Autocomplete title suggestions                                   |
-| `/papers/semantic?q=` | **Semantic vector search** via OpenAI embeddings + pgvector      |
-| `/papers/hybrid?q=`   | **Hybrid search** combining keyword + semantic ranking           |
-| `/papers/meta`        | Dataset metadata (model info + import timestamp)                 |
-| `/stats`              | API + dataset statistics (total papers, with/without embeddings) |
-| `/cache/status`       | View cache state and TTL                                         |
-| `/cache/clear`        | Programmatically flush cache                                     |
+| Endpoint            | Description                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `/clusters`         | Returns AI-labeled biological subtypes (label, keywords, summary) |
+| `/clusters/{id}`    | Returns a single subtype by cluster number                        |
+| `/papers-sb`        | Returns papers from Supabase (filtered by cluster, year, query)   |
+| `/papers`           | SQLAlchemy-based paper endpoint (legacy DB path)                  |
+| `/papers/search?q=` | Keyword search with author/year filters                           |
+| `/stats`            | Dataset statistics (year counts, author frequency)                |
+| `/cache/status`     | View cache state + TTL                                            |
+| `/cache/clear`      | Manually flush cache                                              |
 
 ---
 
 ## 🧮 Database Schema (Supabase)
 
-| Table       | Description                                                   |
-| ----------- | ------------------------------------------------------------- |
-| `papers`    | Core papers (title, abstract, authors_text, embedding vector) |
-| `summaries` | Technical & patient friendly AI summaries by PMID             |
-| `datasets`  | Metadata on imported batches (model names, counts)            |
-
-Includes the RPC function:
-
-```sql
-match_papers(query_embedding vector(1536), match_count int)
-```
-
-→ returns top-N papers ranked by cosine similarity.
+| Table              | Description                                                |
+| ------------------ | ---------------------------------------------------------- |
+| `papers`           | Core papers (title, abstract, authors, embedding, cluster) |
+| `subtype_clusters` | Cluster metadata (label, keywords, summary)                |
+| `summaries`        | Technical + patient summaries by PMID                      |
+| `datasets`         | Import metadata (model names, counts)                      |
 
 ---
 
-## 🧠 AI Features
+## 🧬 AI Cure Features
 
-- 🧩 **AI Summarization** – Two summary styles (technical & plain language)
-- 🧬 **Semantic Search** – OpenAI Embeddings (`text-embedding-3-small`)
-- 🔍 **Hybrid Search** – Weighted keyword + vector similarity
-- ⚡ **Caching** – Instant repeat queries & precomputed stats
-- 📊 **Stats Endpoints** – Paper count & embedding coverage
+| Feature                                | Description                                     |
+| -------------------------------------- | ----------------------------------------------- |
+| **Phase 1 – Data Pipeline**            | Fetch + summarize papers via Hugging Face       |
+| **Phase 2 – Clustering**               | UMAP + HDBSCAN semantic grouping                |
+| **Phase 3 – Labeling & Summarization** | GPT mechanistic labels + cluster summaries      |
+| **Phase 4 – API Integration**          | `/clusters` and `/papers-sb` routes complete    |
+| **Phase 4C – UI Explorer (next)**      | Next.js frontend for visual subtype exploration |
 
 ---
 
-## 🧪 Testing and CI
-
-Run local tests:
+## 🧪 Testing & CI
 
 ```bash
 pytest -v
 ```
 
-All tests auto-run on each Git commit via GitHub Actions.
+All tests run automatically on commit via GitHub Actions.
 
 ---
 
-## 🗺️ Next Milestones
+## 🗺️ Roadmap (Next Phases)
 
-| Phase  | Focus                                   |
-| ------ | --------------------------------------- |
-| **8**  | Hybrid search caching + ranking weights |
-| **9**  | Public REST Docs + API Key auth         |
-| **10** | Next.js frontend dashboard              |
-| **11** | User feedback + dataset submission flow |
+| Phase  | Focus                                                 |
+| ------ | ----------------------------------------------------- |
+| **4C** | Next.js UI integration (subtypes + papers view)       |
+| **4D** | UMAP 2D visualization (Plotly scatter + click filter) |
+| **5**  | Trend analytics dashboard (`/stats` + charts)         |
+| **6**  | Public REST docs + API keys                           |
+| **7**  | User feedback + dataset submission portal             |
 
 ---
 

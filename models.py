@@ -14,6 +14,8 @@ class Paper(Base):
     year = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True))
     authors_text = Column(Text)
-    embedding = Column(JSONB)  # or ARRAY(Float) if you're using pgvector
+    journal = Column(Text, nullable=True)
+    keywords = Column(ARRAY(String), nullable=True)
+    embedding = Column(JSONB)
     technical_summary = Column(Text, nullable=True)
     patient_summary = Column(Text, nullable=True)

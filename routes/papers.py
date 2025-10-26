@@ -30,14 +30,25 @@ def list_papers(
         None, description="Filter by author substring"),
     year: Optional[int] = Query(
         None, description="Filter by publication year"),
+    journal: Optional[str] = Query(
+        None, description="Filter by journal name"),  # 🆕
+    keyword: Optional[str] = Query(
+        None, description="Filter by keyword"),        # 🆕
 ):
     query = db.query(Paper)
 
+    # Filters
     if author:
-        query = query.filter(Paper.authors.ilike(f"%{author}%"))
+        query = query.filter(Paper.authors_text.ilike(f"%{author}%"))
     if year:
         query = query.filter(Paper.year == year)
+    if journal:
+        query = query.filter(Paper.journal.ilike(f"%{journal}%"))
+    if keyword:
+        query = query.filter(Paper.keywords.any(
+            keyword))  # PostgreSQL array search
 
+    # Sorting
     sort_field = getattr(Paper, sort, Paper.year)
     query = query.order_by(
         sort_field.desc() if order.lower() == "desc" else sort_field.asc()
@@ -60,7 +71,10 @@ def search_papers(
         .filter(
             (Paper.title.ilike(search))
             | (Paper.abstract.ilike(search))
-            | (Paper.authors.ilike(search))
+            | (Paper.authors_text.ilike(search))
+            | (Paper.journal.ilike(search))     # 🆕 allow journal matches
+            # 🆕 allow keyword matches
+            | (Paper.keywords.cast(String).ilike(search))
         )
         .limit(limit)
         .all()
@@ -74,4 +88,16 @@ def get_paper(pmid: str, db: Session = Depends(get_db)):
     paper = db.query(Paper).filter(Paper.pmid == pmid).first()
     if not paper:
         raise HTTPException(status_code=404, detail=f"Paper {pmid} not found")
-    return paper
+
+    # ✅ Return explicitly so journal + keywords are guaranteed in response
+    return {
+        "pmid": paper.pmid,
+        "title": paper.title,
+        "authors": paper.authors,
+        "year": paper.year,
+        "journal": paper.journal,
+        "keywords": paper.keywords,
+        "abstract": paper.abstract,
+        "technical_summary": paper.technical_summary,
+        "patient_summary": paper.patient_summary,
+    }
