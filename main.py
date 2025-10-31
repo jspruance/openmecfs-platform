@@ -1,7 +1,12 @@
 # main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Existing route modules
 from routes import papers, datasets, stats, cache, semantic, clusters, papers_supabase
+
+# ✅ Add this import
+from routes.embeddings import router as embeddings_router
 
 # ------------------------------------------------------------
 # 🚀 App Configuration
@@ -15,10 +20,7 @@ app = FastAPI(
 # ------------------------------------------------------------
 # 🌐 CORS Configuration (Frontend Access)
 # ------------------------------------------------------------
-# Allow all origins during development.
-# Later, replace "*" with your deployed frontend URL:
-# e.g., ["https://openmecfs-ui.vercel.app"]
-origins = ["*"]
+origins = ["*"]  # allow all during dev
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +41,9 @@ app.include_router(semantic.router)
 app.include_router(clusters.router)
 app.include_router(papers_supabase.router)
 
+# ✅ Register embeddings route
+app.include_router(embeddings_router)
+
 # ------------------------------------------------------------
 # 🔍 Root Endpoint
 # ------------------------------------------------------------
@@ -46,7 +51,6 @@ app.include_router(papers_supabase.router)
 
 @app.get("/")
 def root():
-    """Root endpoint providing API info"""
     return {
         "project": "Open ME/CFS",
         "description": "AI-summarized ME/CFS research papers",
@@ -57,6 +61,7 @@ def root():
             "/papers/search?q=",
             "/papers/meta",
             "/health",
+            "/embeddings",  # ✅ now exists
         ],
     }
 
@@ -67,5 +72,4 @@ def root():
 
 @app.get("/health")
 def health_check():
-    """Simple uptime check"""
     return {"status": "ok"}

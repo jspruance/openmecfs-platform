@@ -1,6 +1,6 @@
 # routes/papers_supabase.py
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, List
+from typing import Optional
 from utils.db import supabase
 
 router = APIRouter(prefix="/papers-sb", tags=["Papers (Supabase)"])
@@ -9,7 +9,7 @@ router = APIRouter(prefix="/papers-sb", tags=["Papers (Supabase)"])
 @router.get("/")
 def get_papers(
     cluster: Optional[int] = Query(
-        None, description="Filter by cluster number"),
+        None, alias="cluster", description="Filter by cluster number"),
     year: Optional[int] = Query(
         None, description="Filter by publication year"),
     q: Optional[str] = Query(None, description="Search by keyword or title"),
@@ -23,19 +23,20 @@ def get_papers(
         query = supabase.table("papers").select(
             "*").range(offset, offset + limit - 1)
 
+        # ✅ Correct column name in Supabase
         if cluster is not None:
             query = query.eq("cluster", cluster)
+
         if year is not None:
             query = query.eq("year", year)
+
         if q:
-            q_like = f"%{q}%"
-            query = query.ilike("title", q_like)
+            query = query.ilike("title", f"%{q}%")
 
         result = query.execute()
-        if not result.data:
-            return []
-        return result.data
+        return result.data or []
 
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Error fetching papers: {str(e)}")
+            status_code=500, detail=f"Error fetching papers: {str(e)}"
+        )
