@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Existing route modules
 from routes import papers, datasets, stats, cache, semantic, clusters, papers_supabase
 
-# ✅ Add this import
+# ✅ Embeddings route
 from routes.embeddings import router as embeddings_router
 
 # ------------------------------------------------------------
@@ -40,8 +40,6 @@ app.include_router(cache.router)
 app.include_router(semantic.router)
 app.include_router(clusters.router)
 app.include_router(papers_supabase.router)
-
-# ✅ Register embeddings route
 app.include_router(embeddings_router)
 
 # ------------------------------------------------------------
@@ -61,7 +59,7 @@ def root():
             "/papers/search?q=",
             "/papers/meta",
             "/health",
-            "/embeddings",  # ✅ now exists
+            "/embeddings",
         ],
     }
 
@@ -73,3 +71,19 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+# ------------------------------------------------------------
+# 🚀 Run app when executed directly (Railway needs this)
+# ------------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+    import os
+
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=False
+    )
