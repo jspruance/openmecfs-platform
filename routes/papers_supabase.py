@@ -33,11 +33,11 @@ def get_papers(
                 f"title.ilike.%{q}%,abstract.ilike.%{q}%"
             )
 
-        # Topic → keywords
+        # Topic → keywords (aligned with UI params)
         topic_map = {
             "treat": ["treat", "therapy", "trial", "drug", "intervention"],
-            "neurology": ["neuro", "brain", "cogn", "nervous"],
-            "immunology": ["immune", "inflamm", "cytokine", "t cell", "antibody"],
+            "neuro": ["neuro", "brain", "cogn", "nervous"],
+            "immun": ["immune", "inflamm", "cytokine", "t cell", "antibody"],
             "long covid": ["long covid", "covid", "post-viral", "sars"],
         }
 
