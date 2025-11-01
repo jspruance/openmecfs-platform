@@ -63,6 +63,7 @@ def get_papers(
         return {
             "data": data,
             "page": page,
+            "count": len(data),
             "has_more": len(data) == limit,
         }
 
