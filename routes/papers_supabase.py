@@ -50,11 +50,12 @@ def get_papers(
         if year:
             query = query.eq("year", year)
 
-        # ✅ Use whichever param UI sends, default to cluster_label
-        if cluster is not None:
-            query = query.eq("cluster_label", cluster)
-        elif cluster_label is not None:
-            query = query.eq("cluster_label", cluster_label)
+        # ✅ Filter by cluster
+        # Note: papers table uses 'cluster' column to match subtype_clusters.cluster_id
+        cluster_id = cluster if cluster is not None else cluster_label
+        if cluster_id is not None:
+            # Filter papers by cluster value
+            query = query.eq("cluster", cluster_id)
 
         result = query.execute()
         data = result.data or []
