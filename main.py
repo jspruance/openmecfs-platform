@@ -36,7 +36,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# 🌐 Trusted hosts only (NO HTTPS redirect here; Railway handles TLS)
+# 🌐 Trusted hosts only (Railway handles TLS)
 # ------------------------------------------------------------
 app.add_middleware(
     TrustedHostMiddleware,
@@ -71,8 +71,8 @@ app.include_router(clusters.router)
 app.include_router(papers_supabase.router)
 app.include_router(embeddings_router)
 
-# ✅ Support old `/papers-sb` path your frontend is calling
-app.include_router(papers.router, prefix="/papers-sb")
+# ✅ Correct: `/papers-sb` must use Supabase router, NOT PubMed router
+app.include_router(papers_supabase.router, prefix="/papers-sb")
 
 # ------------------------------------------------------------
 # 🔍 Root Route
