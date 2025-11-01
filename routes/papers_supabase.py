@@ -6,6 +6,7 @@ router = APIRouter(prefix="/papers-sb", tags=["Papers (Supabase)"])
 
 
 @router.get("")
+@router.get("/")  # support both forms
 def get_papers(
     sort: Optional[str] = Query("year"),
     limit: int = Query(10, ge=1, le=200),
@@ -25,30 +26,50 @@ def get_papers(
             .range(offset, offset + limit - 1)
         )
 
-        # Full-text search
+        # ✅ Full-text search
         if q:
             query = query.ilike("title", f"%{q}%")
 
-        # ✅ Topic filter — search in title & abstract
-        if topic:
-            query = query.or_(
-                f"title.ilike.%{topic}%,abstract.ilike.%{topic}%"
-            )
+        # ✅ Topic → keyword mapping
+        topic_map = {
+            # UI sends: ?topic=treat
+            "treat": ["treat", "therapy", "trial", "drug", "intervention"],
+
+            # UI sends: ?topic=neuro
+            "neuro": ["neuro", "brain", "cogn", "nervous"],
+
+            # UI sends: ?topic=immun
+            "immun": ["immune", "inflamm", "cytokine", "t cell", "antibody"],
+
+            # UI sends: ?topic=covid
+            "covid": ["covid", "post-viral", "long covid", "sars"],
+        }
+
+        if topic in topic_map:
+            terms = topic_map[topic]
+
+            # ✅ Build OR filter (Supabase syntax)
+            or_filters = []
+            for term in terms:
+                or_filters.append(f"title.ilike.%{term}%")
+                or_filters.append(f"abstract.ilike.%{term}%")
+
+            query = query.or_(",".join(or_filters))
 
         # ✅ Year filter
         if year:
             query = query.eq("year", year)
 
-        # ✅ Cluster filter
+        # ✅ Cluster filter (not used on this page, but keep for compatibility)
         if cluster is not None:
             query = query.eq("cluster", cluster)
 
-        # (Sort param ignored but accepted — no crash)
+        # (Sort still accepted but not implemented here)
 
         result = query.execute()
         data = result.data or []
 
-        # ✅ Stop infinite scroll when no results
+        # ✅ Stop infinite scroll when empty
         return {
             "data": data,
             "page": page,
@@ -56,4 +77,5 @@ def get_papers(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching papers: {str(e)}")
