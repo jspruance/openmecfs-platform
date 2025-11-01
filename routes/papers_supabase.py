@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from utils.db import supabase
 
-router = APIRouter(prefix="/papers-sb", tags=["Papers (Supabase)"])
+# No prefix here — main.py applies it
+router = APIRouter(tags=["Papers (Supabase)"])
 
 
 @router.get("/")
@@ -27,13 +28,9 @@ def get_papers(
             .range(offset, offset + limit - 1)
         )
 
-        # Full text search (title + abstract)
         if q:
-            query = query.or_(
-                f"title.ilike.%{q}%,abstract.ilike.%{q}%"
-            )
+            query = query.or_(f"title.ilike.%{q}%,abstract.ilike.%{q}%")
 
-        # Topic → keywords (aligned with UI params)
         topic_map = {
             "treat": ["treat", "therapy", "trial", "drug", "intervention"],
             "neuro": ["neuro", "brain", "cogn", "nervous"],
@@ -44,12 +41,11 @@ def get_papers(
         if topic:
             topic = topic.lower().replace("-", " ")
             if topic in topic_map:
-                terms = topic_map[topic]
-                or_filters = []
-                for term in terms:
-                    or_filters.append(f"title.ilike.%{term}%")
-                    or_filters.append(f"abstract.ilike.%{term}%")
-                query = query.or_(",".join(or_filters))
+                filters = []
+                for term in topic_map[topic]:
+                    filters += [f"title.ilike.%{term}%",
+                                f"abstract.ilike.%{term}%"]
+                query = query.or_(",".join(filters))
 
         if year:
             query = query.eq("year", year)
