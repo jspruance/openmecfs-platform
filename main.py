@@ -1,6 +1,7 @@
-# main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 # Existing route modules
 from routes import papers, datasets, stats, cache, semantic, clusters, papers_supabase
@@ -18,13 +19,37 @@ app = FastAPI(
 )
 
 # ------------------------------------------------------------
-# 🌐 CORS Configuration (Frontend Access)
+# 🌐 Reverse Proxy & Host Security (Railway + Vercel)
 # ------------------------------------------------------------
-origins = ["*"]  # allow all during dev
 
+# ✅ Trust X-Forwarded-* headers (Railway/Vercel proxy)
+app.add_middleware(ProxyHeadersMiddleware)
+
+# ✅ Restrict hosts (prevents HTTP downgrade issues)
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        "openmecfs-platform-production.up.railway.app",
+        "openmecfs.org",
+        "*.railway.app",
+        "localhost",
+        "127.0.0.1",
+    ],
+)
+
+# ------------------------------------------------------------
+# 🌐 CORS Configuration
+# ------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "https://openmecfs.org",
+        "https://www.openmecfs.org",
+        "https://openmecfs-ui.vercel.app",
+        "https://openmecfs-platform-production.up.railway.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -74,7 +99,7 @@ def health_check():
 
 
 # ------------------------------------------------------------
-# 🚀 Run app when executed directly (Railway needs this)
+# 🚀 Run app (Railway needs this)
 # ------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
