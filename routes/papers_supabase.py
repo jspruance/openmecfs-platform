@@ -1,22 +1,19 @@
-# routes/papers_supabase.py
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from utils.db import supabase
 
 router = APIRouter(prefix="/papers-sb", tags=["Papers (Supabase)"])
 
-# ✅ Allow both `/papers-sb` and `/papers-sb/`
-
 
 @router.get("")
-@router.get("/")
 def get_papers(
-    page: int = Query(1, ge=1),
+    sort: Optional[str] = Query("year"),
     limit: int = Query(10, ge=1, le=200),
-    sort: Optional[str] = Query("year", description="Sort field"),
-    cluster: Optional[int] = Query(None),
-    year: Optional[int] = Query(None),
-    q: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    topic: Optional[str] = None,
+    q: Optional[str] = None,
+    year: Optional[int] = None,
+    cluster: Optional[int] = None,
 ):
     try:
         offset = (page - 1) * limit
@@ -28,18 +25,35 @@ def get_papers(
             .range(offset, offset + limit - 1)
         )
 
-        if cluster is not None:
-            query = query.eq("cluster", cluster)
-
-        if year is not None:
-            query = query.eq("year", year)
-
+        # Full-text search
         if q:
             query = query.ilike("title", f"%{q}%")
 
+        # ✅ Topic filter — search in title & abstract
+        if topic:
+            query = query.or_(
+                f"title.ilike.%{topic}%,abstract.ilike.%{topic}%"
+            )
+
+        # ✅ Year filter
+        if year:
+            query = query.eq("year", year)
+
+        # ✅ Cluster filter
+        if cluster is not None:
+            query = query.eq("cluster", cluster)
+
+        # (Sort param ignored but accepted — no crash)
+
         result = query.execute()
-        return result.data or []
+        data = result.data or []
+
+        # ✅ Stop infinite scroll when no results
+        return {
+            "data": data,
+            "page": page,
+            "count": len(data),
+        }
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching papers: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
