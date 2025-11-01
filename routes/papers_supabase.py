@@ -4,7 +4,6 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from utils.db import supabase
 
-# No prefix here — main.py applies it
 router = APIRouter(tags=["Papers (Supabase)"])
 
 
@@ -17,6 +16,7 @@ def get_papers(
     q: Optional[str] = None,
     year: Optional[int] = None,
     cluster: Optional[int] = None,
+    cluster_label: Optional[int] = None,  # ✅ support alt name
 ):
     try:
         offset = (page - 1) * limit
@@ -50,8 +50,11 @@ def get_papers(
         if year:
             query = query.eq("year", year)
 
+        # ✅ Use whichever param UI sends, default to cluster_label
         if cluster is not None:
-            query = query.eq("cluster", cluster)
+            query = query.eq("cluster_label", cluster)
+        elif cluster_label is not None:
+            query = query.eq("cluster_label", cluster_label)
 
         result = query.execute()
         data = result.data or []
@@ -65,5 +68,4 @@ def get_papers(
 
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Error fetching papers: {str(e)}"
-        )
+            status_code=500, detail=f"Error fetching papers: {str(e)}")
