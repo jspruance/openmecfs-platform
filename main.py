@@ -34,7 +34,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# 🌐 Trusted Hosts (Railway handles HTTPS)
+# 🌐 Trusted Hosts
 # ------------------------------------------------------------
 app.add_middleware(
     TrustedHostMiddleware,
@@ -60,14 +60,14 @@ async def preflight_handler(rest_of_path: str):
 # ------------------------------------------------------------
 # 📚 Routes
 # ------------------------------------------------------------
-app.include_router(papers.router)              # Postgres SQL /papers
+app.include_router(papers.router)
 app.include_router(datasets.router)
 app.include_router(stats.router)
 app.include_router(cache.router)
 app.include_router(semantic.router)
 app.include_router(clusters.router)
 
-# ✅ Supabase papers ONLY mounted here
+# ✅ Supabase papers mounted at /papers-sb
 app.include_router(papers_supabase.router, prefix="/papers-sb")
 
 app.include_router(embeddings_router)
