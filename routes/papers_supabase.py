@@ -1,5 +1,5 @@
 # openmecfs-platform/routes/papers_supabase.py
-
+# serves the /research/subtypes page
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from utils.db import supabase
