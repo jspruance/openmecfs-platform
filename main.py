@@ -1,8 +1,7 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# HTTPS + proxy support
-from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
+# HTTPS + host validation support
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 
@@ -20,29 +19,7 @@ app = FastAPI(
 )
 
 # ------------------------------------------------------------
-# 🌐 Trust Railway Proxy & Force HTTPS
-# ------------------------------------------------------------
-# respect X-Forwarded-* headers from Railway
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
-
-# force HTTPS for any accidental HTTP traffic
-app.add_middleware(HTTPSRedirectMiddleware)
-
-# verify incoming hosts
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=[
-        "openmecfs.org",
-        "www.openmecfs.org",
-        "*.vercel.app",
-        "*.railway.app",
-        "localhost",
-        "127.0.0.1",
-    ],
-)
-
-# ------------------------------------------------------------
-# 🌐 CORS
+# 🌐 CORS (must be BEFORE routing)
 # ------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -56,6 +33,23 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# ------------------------------------------------------------
+# 🌐 HTTPS redirect + host allow list
+# ------------------------------------------------------------
+app.add_middleware(HTTPSRedirectMiddleware)
+
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        "openmecfs.org",
+        "www.openmecfs.org",
+        "*.vercel.app",
+        "*.railway.app",
+        "localhost",
+        "127.0.0.1",
+    ],
 )
 
 # ------------------------------------------------------------
@@ -102,7 +96,7 @@ def health_check():
 
 
 # ------------------------------------------------------------
-# 🔥 Uvicorn (local only — Railway ignores this)
+# 🔥 Local run only (Railway ignores this)
 # ------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
