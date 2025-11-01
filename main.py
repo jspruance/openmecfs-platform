@@ -1,11 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 # Existing route modules
 from routes import papers, datasets, stats, cache, semantic, clusters, papers_supabase
-
-# ✅ Embeddings route
 from routes.embeddings import router as embeddings_router
 
 # ------------------------------------------------------------
@@ -18,22 +15,20 @@ app = FastAPI(
 )
 
 # ------------------------------------------------------------
-# 🌐 Trusted Proxies / Hosts (Railway + Vercel)
+# 🌐 Force HTTPS (fix mixed-content)
 # ------------------------------------------------------------
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=[
-        "openmecfs.org",
-        "www.openmecfs.org",
-        "openmecfs-platform-production.up.railway.app",
-        "*.railway.app",
-        "localhost",
-        "127.0.0.1",
-    ],
-)
+
+
+@app.middleware("http")
+async def redirect_http_to_https(request: Request, call_next):
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    if forwarded_proto == "http":
+        url = request.url.replace(scheme="https")
+        return RedirectResponse(str(url))
+    return await call_next(request)
 
 # ------------------------------------------------------------
-# 🌐 CORS Configuration
+# 🌐 CORS (Frontend allowed)
 # ------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -42,8 +37,6 @@ app.add_middleware(
         "https://www.openmecfs.org",
         "https://openmecfs-ui.vercel.app",
         "https://openmecfs-platform-production.up.railway.app",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -99,11 +92,5 @@ def health_check():
 if __name__ == "__main__":
     import uvicorn
     import os
-
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=False
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
