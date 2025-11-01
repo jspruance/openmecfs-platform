@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
 # Existing route modules
@@ -19,18 +18,14 @@ app = FastAPI(
 )
 
 # ------------------------------------------------------------
-# 🌐 Reverse Proxy & Host Security (Railway + Vercel)
+# 🌐 Trusted Proxies / Hosts (Railway + Vercel)
 # ------------------------------------------------------------
-
-# ✅ Trust X-Forwarded-* headers (Railway/Vercel proxy)
-app.add_middleware(ProxyHeadersMiddleware)
-
-# ✅ Restrict hosts (prevents HTTP downgrade issues)
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=[
-        "openmecfs-platform-production.up.railway.app",
         "openmecfs.org",
+        "www.openmecfs.org",
+        "openmecfs-platform-production.up.railway.app",
         "*.railway.app",
         "localhost",
         "127.0.0.1",
@@ -56,7 +51,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# 📚 Route Registration
+# 📚 Routes
 # ------------------------------------------------------------
 app.include_router(papers.router)
 app.include_router(datasets.router)
@@ -68,7 +63,7 @@ app.include_router(papers_supabase.router)
 app.include_router(embeddings_router)
 
 # ------------------------------------------------------------
-# 🔍 Root Endpoint
+# 🔍 Root
 # ------------------------------------------------------------
 
 
@@ -89,7 +84,7 @@ def root():
     }
 
 # ------------------------------------------------------------
-# ❤️ Health Check
+# ❤️ Health
 # ------------------------------------------------------------
 
 
@@ -99,7 +94,7 @@ def health_check():
 
 
 # ------------------------------------------------------------
-# 🚀 Run app (Railway needs this)
+# 🚀 Run (Railway)
 # ------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
