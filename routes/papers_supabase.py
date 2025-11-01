@@ -27,13 +27,13 @@ def get_papers(
             .range(offset, offset + limit - 1)
         )
 
-        # ✅ full text search
+        # Full text search (title + abstract)
         if q:
             query = query.or_(
                 f"title.ilike.%{q}%,abstract.ilike.%{q}%"
             )
 
-        # ✅ Expanded topic keywords to match UI buttons
+        # Topic → keywords
         topic_map = {
             "treat": ["treat", "therapy", "trial", "drug", "intervention"],
             "neurology": ["neuro", "brain", "cogn", "nervous"],
@@ -41,32 +41,25 @@ def get_papers(
             "long covid": ["long covid", "covid", "post-viral", "sars"],
         }
 
-        # Normalize incoming topic (lowercase)
         if topic:
             topic = topic.lower().replace("-", " ")
+            if topic in topic_map:
+                terms = topic_map[topic]
+                or_filters = []
+                for term in terms:
+                    or_filters.append(f"title.ilike.%{term}%")
+                    or_filters.append(f"abstract.ilike.%{term}%")
+                query = query.or_(",".join(or_filters))
 
-        # ✅ topic filter (title + abstract)
-        if topic in topic_map:
-            terms = topic_map[topic]
-            or_filters = []
-            for term in terms:
-                or_filters.append(f"title.ilike.%{term}%")
-                or_filters.append(f"abstract.ilike.%{term}%")
-
-            query = query.or_(",".join(or_filters))
-
-        # ✅ year filter
         if year:
             query = query.eq("year", year)
 
-        # ✅ cluster filter
         if cluster is not None:
             query = query.eq("cluster", cluster)
 
         result = query.execute()
         data = result.data or []
 
-        # ✅ stop infinite scroll — no more pages if empty
         return {
             "data": data,
             "page": page,
@@ -75,4 +68,5 @@ def get_papers(
 
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Error fetching papers: {str(e_
+            status_code=500, detail=f"Error fetching papers: {str(e)}"
+        )
