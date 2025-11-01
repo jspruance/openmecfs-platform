@@ -30,10 +30,10 @@ def list_papers(
         None, description="Filter by author substring"),
     year: Optional[int] = Query(
         None, description="Filter by publication year"),
-    journal: Optional[str] = Query(
-        None, description="Filter by journal name"),  # 🆕
-    keyword: Optional[str] = Query(
-        None, description="Filter by keyword"),        # 🆕
+    journal: Optional[str] = Query(None, description="Filter by journal name"),
+    keyword: Optional[str] = Query(None, description="Filter by keyword"),
+    cluster: Optional[int] = Query(
+        None, description="Filter by cluster label"),  # ✅ NEW
 ):
     query = db.query(Paper)
 
@@ -45,8 +45,9 @@ def list_papers(
     if journal:
         query = query.filter(Paper.journal.ilike(f"%{journal}%"))
     if keyword:
-        query = query.filter(Paper.keywords.any(
-            keyword))  # PostgreSQL array search
+        query = query.filter(Paper.keywords.any(keyword))
+    if cluster is not None:  # ✅ NEW filter
+        query = query.filter(Paper.cluster_label == cluster)
 
     # Sorting
     sort_field = getattr(Paper, sort, Paper.year)
