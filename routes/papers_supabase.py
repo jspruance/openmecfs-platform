@@ -1,3 +1,5 @@
+# openmecfs-platform/routes/papers_supabase.py
+
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from utils.db import supabase
@@ -25,16 +27,25 @@ def get_papers(
             .range(offset, offset + limit - 1)
         )
 
+        # ✅ full text search
         if q:
-            query = query.ilike("title", f"%{q}%")
+            query = query.or_(
+                f"title.ilike.%{q}%,abstract.ilike.%{q}%"
+            )
 
+        # ✅ Expanded topic keywords to match UI buttons
         topic_map = {
             "treat": ["treat", "therapy", "trial", "drug", "intervention"],
-            "neuro": ["neuro", "brain", "cogn", "nervous"],
-            "immun": ["immune", "inflamm", "cytokine", "t cell", "antibody"],
-            "covid": ["covid", "post-viral", "long covid", "sars"],
+            "neurology": ["neuro", "brain", "cogn", "nervous"],
+            "immunology": ["immune", "inflamm", "cytokine", "t cell", "antibody"],
+            "long covid": ["long covid", "covid", "post-viral", "sars"],
         }
 
+        # Normalize incoming topic (lowercase)
+        if topic:
+            topic = topic.lower().replace("-", " ")
+
+        # ✅ topic filter (title + abstract)
         if topic in topic_map:
             terms = topic_map[topic]
             or_filters = []
@@ -42,24 +53,26 @@ def get_papers(
                 or_filters.append(f"title.ilike.%{term}%")
                 or_filters.append(f"abstract.ilike.%{term}%")
 
-            or_query = ",".join(or_filters)
-            query = query.or_(or_query)
+            query = query.or_(",".join(or_filters))
 
+        # ✅ year filter
         if year:
             query = query.eq("year", year)
 
+        # ✅ cluster filter
         if cluster is not None:
             query = query.eq("cluster", cluster)
 
         result = query.execute()
         data = result.data or []
 
+        # ✅ stop infinite scroll — no more pages if empty
         return {
             "data": data,
             "page": page,
-            "count": len(data),
+            "has_more": len(data) == limit,
         }
 
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Error fetching papers: {str(e)}")
+            status_code=500, detail=f"Error fetching papers: {str(e_
