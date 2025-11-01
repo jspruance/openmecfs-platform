@@ -1,6 +1,7 @@
 # routes/papers.py
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy import String  # ✅ needed for keyword cast search
 from database import SessionLocal
 from models import Paper
 from typing import Optional
@@ -17,8 +18,9 @@ def get_db():
     finally:
         db.close()
 
-
 # 🧠 List Papers (filters, pagination, sorting)
+
+
 @router.get("/")
 def list_papers(
     db: Session = Depends(get_db),
@@ -45,9 +47,11 @@ def list_papers(
     if journal:
         query = query.filter(Paper.journal.ilike(f"%{journal}%"))
     if keyword:
-        query = query.filter(Paper.keywords.any(keyword))
-    if cluster is not None:  # ✅ NEW filter
-        query = query.filter(Paper.cluster_label == cluster)
+        query = query.filter(Paper.keywords.any(
+            keyword))  # ✅ Postgres array lookup
+    if cluster is not None:
+        query = query.filter(Paper.cluster_label ==
+                             cluster)  # ✅ cluster support
 
     # Sorting
     sort_field = getattr(Paper, sort, Paper.year)
@@ -58,8 +62,9 @@ def list_papers(
     results = query.offset((page - 1) * limit).limit(limit).all()
     return results
 
-
 # 🔍 Search Endpoint
+
+
 @router.get("/search")
 def search_papers(
     q: str = Query(..., description="Full-text search"),
@@ -73,24 +78,23 @@ def search_papers(
             (Paper.title.ilike(search))
             | (Paper.abstract.ilike(search))
             | (Paper.authors_text.ilike(search))
-            | (Paper.journal.ilike(search))     # 🆕 allow journal matches
-            # 🆕 allow keyword matches
-            | (Paper.keywords.cast(String).ilike(search))
+            | (Paper.journal.ilike(search))
+            | (Paper.keywords.cast(String).ilike(search))  # ✅ keyword search
         )
         .limit(limit)
         .all()
     )
     return results
 
-
 # 📄 Single Paper by PMID
+
+
 @router.get("/{pmid}")
 def get_paper(pmid: str, db: Session = Depends(get_db)):
     paper = db.query(Paper).filter(Paper.pmid == pmid).first()
     if not paper:
         raise HTTPException(status_code=404, detail=f"Paper {pmid} not found")
 
-    # ✅ Return explicitly so journal + keywords are guaranteed in response
     return {
         "pmid": paper.pmid,
         "title": paper.title,
@@ -101,4 +105,5 @@ def get_paper(pmid: str, db: Session = Depends(get_db)):
         "abstract": paper.abstract,
         "technical_summary": paper.technical_summary,
         "patient_summary": paper.patient_summary,
+        "cluster_label": paper.cluster_label,  # ✅ include cluster for UI
     }
