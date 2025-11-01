@@ -5,18 +5,24 @@ from utils.db import supabase
 
 router = APIRouter(prefix="/papers-sb", tags=["Papers (Supabase)"])
 
-# ✅ UI & API both hit this endpoint
+# ------------------------------------------------------------
+# ✅ Main unified endpoint used by UI & SSR
+# ------------------------------------------------------------
 
 
-@router.get("")
+@router.get("/")
 def get_papers(
-    sort: Optional[str] = Query("year", description="Sort field"),
-    limit: int = Query(10, ge=1, le=200),
     page: int = Query(1, ge=1),
-    cluster: Optional[int] = None,
-    year: Optional[int] = None,
-    q: Optional[str] = None,
+    limit: int = Query(10, ge=1, le=200),
+    sort: Optional[str] = Query("year", description="Sort field"),
+    cluster: Optional[int] = Query(None),
+    year: Optional[int] = Query(None),
+    q: Optional[str] = Query(None),
 ):
+    """
+    Unified papers endpoint supporting pagination, filters, and SSR-safe defaults.
+    """
+
     try:
         offset = (page - 1) * limit
 
@@ -27,6 +33,7 @@ def get_papers(
             .range(offset, offset + limit - 1)
         )
 
+        # ✅ Filtering
         if cluster is not None:
             query = query.eq("cluster", cluster)
 
@@ -36,11 +43,38 @@ def get_papers(
         if q:
             query = query.ilike("title", f"%{q}%")
 
-        # ✅ allow the sort param even if we ignore for now
-        # future: query.order(sort)
+        # ✅ Allow sort param (UI sends it)
+        # Future: query = query.order(sort)
 
         result = query.execute()
         return result.data or []
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching papers: {str(e)}")
+
+
+# ------------------------------------------------------------
+# ✅ Legacy fallback — if any code calls `/papers-sb/list`
+# ------------------------------------------------------------
+@router.get("/list")
+def get_papers_legacy(
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=200),
+):
+    try:
+        offset = (page - 1) * limit
+
+        result = (
+            supabase
+            .table("papers")
+            .select("*")
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
+
+        return result.data or []
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching papers: {str(e)}")
