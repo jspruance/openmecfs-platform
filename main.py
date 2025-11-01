@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
-# HTTPS + host validation support
+# Host validation support only (NO HTTPS redirect here)
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 # Routes
 from routes import papers, datasets, stats, cache, semantic, clusters, papers_supabase
@@ -19,7 +19,7 @@ app = FastAPI(
 )
 
 # ------------------------------------------------------------
-# 🌐 CORS (must be BEFORE routing)
+# 🌐 CORS (FIRST middleware, mandatory order)
 # ------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -36,10 +36,8 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# 🌐 HTTPS redirect + host allow list
+# 🌐 Trusted hosts only (NO HTTPS redirect here; Railway handles TLS)
 # ------------------------------------------------------------
-app.add_middleware(HTTPSRedirectMiddleware)
-
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=[
@@ -53,6 +51,15 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
+# 🌐 Manual CORS preflight fallback (Railway sometimes drops OPTIONS)
+# ------------------------------------------------------------
+
+
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(rest_of_path: str):
+    return Response(status_code=200)
+
+# ------------------------------------------------------------
 # 📚 Routes
 # ------------------------------------------------------------
 app.include_router(papers.router)
@@ -64,6 +71,9 @@ app.include_router(clusters.router)
 app.include_router(papers_supabase.router)
 app.include_router(embeddings_router)
 
+# ✅ Support old `/papers-sb` path your frontend is calling
+app.include_router(papers.router, prefix="/papers-sb")
+
 # ------------------------------------------------------------
 # 🔍 Root Route
 # ------------------------------------------------------------
@@ -73,10 +83,11 @@ app.include_router(embeddings_router)
 def root():
     return {
         "project": "Open ME/CFS",
-        "description": "AI-summarized ME/CFS research papers",
+        "description": "AI-summarized ME/CFS research data",
         "version": "0.1.2",
         "endpoints": [
             "/papers",
+            "/papers-sb",
             "/papers/{pmid}",
             "/papers/search?q=",
             "/papers/meta",
@@ -96,7 +107,7 @@ def health_check():
 
 
 # ------------------------------------------------------------
-# 🔥 Local run only (Railway ignores this)
+# 🔥 Local only
 # ------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
