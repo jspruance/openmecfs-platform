@@ -5,11 +5,10 @@ from utils.db import supabase
 
 router = APIRouter(prefix="/papers-sb", tags=["Papers (Supabase)"])
 
-# ------------------------------------------------------------
-# ✅ Main unified endpoint used by UI & SSR
-# ------------------------------------------------------------
+# ✅ Allow both `/papers-sb` and `/papers-sb/`
 
 
+@router.get("")
 @router.get("/")
 def get_papers(
     page: int = Query(1, ge=1),
@@ -19,10 +18,6 @@ def get_papers(
     year: Optional[int] = Query(None),
     q: Optional[str] = Query(None),
 ):
-    """
-    Unified papers endpoint supporting pagination, filters, and SSR-safe defaults.
-    """
-
     try:
         offset = (page - 1) * limit
 
@@ -33,7 +28,6 @@ def get_papers(
             .range(offset, offset + limit - 1)
         )
 
-        # ✅ Filtering
         if cluster is not None:
             query = query.eq("cluster", cluster)
 
@@ -43,36 +37,7 @@ def get_papers(
         if q:
             query = query.ilike("title", f"%{q}%")
 
-        # ✅ Allow sort param (UI sends it)
-        # Future: query = query.order(sort)
-
         result = query.execute()
-        return result.data or []
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching papers: {str(e)}")
-
-
-# ------------------------------------------------------------
-# ✅ Legacy fallback — if any code calls `/papers-sb/list`
-# ------------------------------------------------------------
-@router.get("/list")
-def get_papers_legacy(
-    page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=200),
-):
-    try:
-        offset = (page - 1) * limit
-
-        result = (
-            supabase
-            .table("papers")
-            .select("*")
-            .range(offset, offset + limit - 1)
-            .execute()
-        )
-
         return result.data or []
 
     except Exception as e:
