@@ -1,55 +1,41 @@
 # routes/clusters.py
+
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
-from utils.db import supabase
+from typing import List, Dict, Any
+from utils.db import supabase  # adjust if your supabase client lives elsewhere
 
 router = APIRouter(prefix="/clusters", tags=["Clusters"])
 
-# ------------------------------------------------------------
-# 🧩 Data Models
-# ------------------------------------------------------------
 
-
-class Cluster(BaseModel):
-    id: str
-    cluster_num: Optional[int]
-    cluster_label: Optional[str]
-    keywords: Optional[List[str]]
-    cluster_summary: Optional[str]
-
-
-# ------------------------------------------------------------
-# 🚀 Routes
-# ------------------------------------------------------------
-@router.get("/", response_model=List[Cluster])
-def get_clusters():
-    """Return all cluster metadata (label, keywords, summary)"""
+def _fetch_clusters() -> List[Dict[str, Any]]:
+    """
+    Fetch cluster metadata from your backing store.
+    Adjust the table/columns as needed to match your schema.
+    """
     try:
-        result = supabase.table("subtype_clusters").select("*").execute()
-        if not result.data:
-            raise HTTPException(status_code=404, detail="No clusters found")
-        return result.data
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Error fetching clusters: {str(e)}")
-
-
-@router.get("/{cluster_num}", response_model=Cluster)
-def get_cluster_by_num(cluster_num: int):
-    """Return a single cluster by numeric ID"""
-    try:
-        result = (
-            supabase.table("subtype_clusters")
-            .select("*")
-            .eq("cluster_num", cluster_num)
-            .limit(1)
+        # Example: table 'subtype_clusters' with these columns
+        resp = (
+            supabase
+            .table("subtype_clusters")
+            .select("cluster_num, cluster_label, keywords, cluster_summary")
+            .order("cluster_num")
             .execute()
         )
-        if not result.data:
-            raise HTTPException(
-                status_code=404, detail=f"Cluster {cluster_num} not found")
-        return result.data[0]
+        return resp.data or []
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Error fetching cluster: {str(e)}")
+            status_code=500, detail=f"Error fetching clusters: {e}")
+
+# ✅ Accepts /clusters  (no trailing slash)
+
+
+@router.get("")
+def get_clusters_no_slash():
+    return _fetch_clusters()
+
+# ✅ Accepts /clusters/ (trailing slash)
+
+
+@router.get("/")
+def get_clusters_with_slash():
+    return _fetch_clusters()
