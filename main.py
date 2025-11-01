@@ -1,8 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-
-# Host validation support only (NO HTTPS redirect here)
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Routes
@@ -19,7 +17,7 @@ app = FastAPI(
 )
 
 # ------------------------------------------------------------
-# 🌐 CORS (FIRST middleware, mandatory order)
+# 🌐 CORS (FIRST middleware)
 # ------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -36,7 +34,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# 🌐 Trusted hosts only (Railway handles TLS)
+# 🌐 Trusted Hosts (Railway handles HTTPS)
 # ------------------------------------------------------------
 app.add_middleware(
     TrustedHostMiddleware,
@@ -51,7 +49,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# 🌐 Manual CORS preflight fallback (Railway sometimes drops OPTIONS)
+# 🌐 Manual CORS preflight fallback
 # ------------------------------------------------------------
 
 
@@ -62,17 +60,17 @@ async def preflight_handler(rest_of_path: str):
 # ------------------------------------------------------------
 # 📚 Routes
 # ------------------------------------------------------------
-app.include_router(papers.router)
+app.include_router(papers.router)              # Postgres SQL /papers
 app.include_router(datasets.router)
 app.include_router(stats.router)
 app.include_router(cache.router)
 app.include_router(semantic.router)
 app.include_router(clusters.router)
-app.include_router(papers_supabase.router)
-app.include_router(embeddings_router)
 
-# ✅ Correct: `/papers-sb` must use Supabase router, NOT PubMed router
+# ✅ Supabase papers ONLY mounted here
 app.include_router(papers_supabase.router, prefix="/papers-sb")
+
+app.include_router(embeddings_router)
 
 # ------------------------------------------------------------
 # 🔍 Root Route
@@ -107,7 +105,7 @@ def health_check():
 
 
 # ------------------------------------------------------------
-# 🔥 Local only
+# 🔥 Local Dev Only
 # ------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
