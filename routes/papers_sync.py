@@ -14,38 +14,45 @@ def sync_paper(pmid: str):
     If it already exists, return the existing row.
     """
 
-    # 1️⃣ Check if paper already exists
-    existing = (
-        supabase.table("papers")
-        .select("*")
-        .eq("pmid", pmid)
-        .maybe_single()
-        .execute()
-    )
+    print(f"[SYNC] Checking Supabase for PMID {pmid}")
 
-    if existing.data:
+    # 1️⃣ Check if paper already exists (safe handling)
+    try:
+        existing = (
+            supabase.table("papers")
+            .select("*")
+            .eq("pmid", pmid)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        print(f"[SYNC ERROR] Supabase query failed: {e}")
+        existing = None
+
+    # ✅ Prevent NoneType crash
+    if existing and getattr(existing, "data", None):
+        print(f"[SYNC] Found cached paper for PMID {pmid}")
         return existing.data
 
-    # 2️⃣ Fetch from EuropePMC
+    print(f"[SYNC] Fetching from EuropePMC for PMID {pmid}")
     data = fetch_pmc_data(pmid)
+
     if not data:
         raise HTTPException(
             status_code=404,
             detail=f"PMID {pmid} not found on EuropePMC"
         )
 
-    # Defensive defaults
+    # Normalize fields
     title = (data.get("title") or "").strip()
     abstract = (data.get("abstract") or "").strip()
     journal = (data.get("journal") or "").strip()
     year = data.get("year") or None
     authors = data.get("authors") or []
 
-    # Ensure authors is always a list
     if not isinstance(authors, list):
         authors = [authors]
 
-    # 3️⃣ Insert into Supabase
     payload = {
         "pmid": pmid,
         "title": title,
@@ -55,9 +62,18 @@ def sync_paper(pmid: str):
         "authors": authors,
     }
 
-    res = supabase.table("papers").insert(payload).execute()
+    print(f"[SYNC] Inserting into Supabase... {payload}")
 
-    if not res.data:
-        raise HTTPException(status_code=500, detail="Failed to insert paper")
+    # 3️⃣ Insert into Supabase
+    try:
+        res = supabase.table("papers").insert(payload).execute()
+    except Exception as e:
+        print(f"[SYNC ERROR] Insert failed: {e}")
+        raise HTTPException(status_code=500, detail="DB insert failed")
 
+    if not res or not res.data:
+        raise HTTPException(
+            status_code=500, detail="Insert failed: no data returned")
+
+    print(f"[SYNC] ✅ Saved paper {pmid} with ID {res.data[0]['id']}")
     return res.data[0]
