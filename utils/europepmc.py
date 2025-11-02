@@ -1,28 +1,39 @@
 # utils/europepmc.py
 
-import aiohttp
+import requests
 
 
-async def fetch_pmc_data(pmid: str):
+def fetch_pmc_data(pmid: str):
     url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID:{pmid}&format=json"
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                return None
+    try:
+        r = requests.get(url, timeout=10)
+    except Exception as e:
+        print(f"[EuropePMC] Request failed for PMID {pmid}: {e}")
+        return None
 
-            data = await resp.json()
-            result = data.get("resultList", {}).get("result", [])
+    if r.status_code != 200:
+        print(f"[EuropePMC] Non-200 response {r.status_code} for PMID {pmid}")
+        return None
 
-            if not result:
-                return None
+    try:
+        data = r.json()
+    except Exception as e:
+        print(f"[EuropePMC] Failed to parse JSON for PMID {pmid}: {e}")
+        return None
 
-            p = result[0]
+    result = data.get("resultList", {}).get("result", [])
+    if not result:
+        print(f"[EuropePMC] No result found on EuropePMC for PMID {pmid}")
+        return None
 
-            return {
-                "title": p.get("title"),
-                "abstract": p.get("abstractText"),
-                "journal": p.get("journalTitle"),
-                "year": p.get("pubYear"),
-                "authors": p.get("authorString", "").split(", "),
-            }
+    p = result[0]
+
+    return {
+        "title": p.get("title"),
+        "abstract": p.get("abstractText"),
+        "journal": p.get("journalTitle"),
+        "year": p.get("pubYear"),
+        # Ensure authors is always a list
+        "authors": p.get("authorString", "").split(", ") if p.get("authorString") else [],
+    }

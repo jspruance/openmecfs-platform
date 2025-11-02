@@ -8,34 +8,51 @@ router = APIRouter(prefix="/papers", tags=["Papers"])
 
 
 @router.post("/sync/{pmid}")
-async def sync_paper(pmid: str):
-    # 1️⃣ See if the paper already exists in Supabase
-    existing = supabase.table("papers").select(
-        "*").eq("pmid", pmid).maybe_single().execute()
+def sync_paper(pmid: str):
+    """
+    Sync a paper from EuropePMC into Supabase `papers` table.
+    If it already exists, return the existing row.
+    """
+
+    # 1️⃣ Check if paper already exists
+    existing = (
+        supabase.table("papers")
+        .select("*")
+        .eq("pmid", pmid)
+        .maybe_single()
+        .execute()
+    )
+
     if existing.data:
         return existing.data
 
-    # 2️⃣ Fetch metadata from Europe PMC
-    data = await fetch_pmc_data(pmid)
+    # 2️⃣ Fetch from EuropePMC
+    data = fetch_pmc_data(pmid)
     if not data:
         raise HTTPException(
-            status_code=404, detail=f"PMID {pmid} not found on EuropePMC")
+            status_code=404,
+            detail=f"PMID {pmid} not found on EuropePMC"
+        )
 
     # Defensive defaults
-    title = data.get("title") or ""
-    abstract = data.get("abstract") or ""
-    journal = data.get("journal") or ""
+    title = (data.get("title") or "").strip()
+    abstract = (data.get("abstract") or "").strip()
+    journal = (data.get("journal") or "").strip()
     year = data.get("year") or None
-    authors = data.get("authors") or ""
+    authors = data.get("authors") or []
 
-    # 3️⃣ Insert into Supabase papers table
+    # Ensure authors is always a list
+    if not isinstance(authors, list):
+        authors = [authors]
+
+    # 3️⃣ Insert into Supabase
     payload = {
         "pmid": pmid,
-        "title": title.strip(),
-        "abstract": abstract.strip(),
-        "journal": journal.strip(),
+        "title": title,
+        "abstract": abstract,
+        "journal": journal,
         "year": year,
-        "authors": authors if isinstance(authors, list) else [authors],
+        "authors": authors,
     }
 
     res = supabase.table("papers").insert(payload).execute()
