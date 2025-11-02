@@ -204,3 +204,44 @@ def get_datasets():
             "last_updated": datetime.utcnow().isoformat(),
         }
     ]
+
+# ------------------------------------------------------------
+# 🧠 Evidence Engine DB Helpers
+# ------------------------------------------------------------
+
+
+def fetch_paper_by_id(paper_id: str):
+    """Fetch single paper record by UUID"""
+    res = supabase.table("papers").select(
+        "*").eq("id", paper_id).single().execute()
+    return res.data
+
+
+def find_summary_by_hash(hash_key: str):
+    """Prevent recomputing evidence for same abstract text"""
+    res = (
+        supabase.table("paper_summaries")
+        .select("*")
+        .eq("hash", hash_key)
+        .maybe_single()
+        .execute()
+    )
+    return res.data
+
+
+def insert_paper_summary(paper_id: str, summary: dict, hash_key: str):
+    """Store LLM-generated mechanistic evidence for a paper"""
+    payload = {
+        "paper_id": paper_id,
+        "provider": "openai",
+        "model": summary.get("model", "gpt-5"),
+        "one_sentence": summary["one_sentence"],
+        "mechanisms": summary.get("mechanisms", []),
+        "biomarkers": summary.get("biomarkers", []),
+        "confidence": summary.get("confidence", 0),
+        "tags": summary.get("tags", []),
+        "hash": hash_key,
+    }
+
+    res = supabase.table("paper_summaries").insert(payload).execute()
+    return res.data[0]

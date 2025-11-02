@@ -5,6 +5,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Routes
 from routes import papers, datasets, stats, cache, semantic, clusters, papers_supabase
+from routes.papers_sync import router as papers_sync_router
+
 from routes.embeddings import router as embeddings_router
 
 # ------------------------------------------------------------
@@ -15,6 +17,7 @@ app = FastAPI(
     description="Public API serving summarized ME/CFS research data",
     version="0.1.2",
 )
+
 
 # ------------------------------------------------------------
 # 🌐 CORS (FIRST middleware)
@@ -69,6 +72,7 @@ app.include_router(clusters.router)
 
 # ✅ Supabase papers mounted at /papers-sb
 app.include_router(papers_supabase.router, prefix="/papers-sb")
+app.include_router(papers_sync_router)
 
 app.include_router(embeddings_router)
 
