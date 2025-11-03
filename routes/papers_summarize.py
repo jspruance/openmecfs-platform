@@ -86,10 +86,11 @@ async def summarize_paper(pmid: str):
             response_format={"type": "json_object"}
         )
 
-        ai = resp.choices[0].message.parsed
+        raw = resp.choices[0].message.content  # ✅ raw json string
+        ai = json.loads(raw)                  # ✅ manually parse
 
     except Exception as e:
-        # Try to show raw text for debugging
+        # fallback try to extract raw content for debugging
         raw = None
         try:
             raw = resp.choices[0].message.content
