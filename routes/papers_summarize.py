@@ -95,9 +95,9 @@ async def summarize_paper(pmid: str):
             }
         )
 
-    # 4️⃣ Store summary
+    # 4️⃣ Store summary (✅ Correct FK)
     supabase.table("paper_summaries").insert({
-        "paper_id": paper["id"],  # ✅ FIXED FK
+        "paper_id": paper["paper_id"],   # ✅ correct foreign key field
         "provider": "openai",
         "model": "gpt-5",
         "one_sentence": ai.get("one_sentence", ""),
