@@ -70,7 +70,8 @@ def get_papers(
 
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Error fetching papers: {str(e)}")
+            status_code=500, detail=f"Error fetching papers: {str(e)}"
+        )
 
 
 # ============================================================
@@ -83,7 +84,8 @@ def sync_paper(pmid: str):
     metadata = fetch_pmc_data(pmid)
     if not metadata:
         raise HTTPException(
-            status_code=404, detail="Paper not found at EuropePMC")
+            status_code=404, detail=f"PMID {pmid} not found on EuropePMC"
+        )
 
     # 2️⃣ Build DB object
     row = {
@@ -91,15 +93,16 @@ def sync_paper(pmid: str):
         "title": metadata.get("title"),
         "abstract": metadata.get("abstract"),
         "authors": metadata.get("authors") or [],
+        "authors_text": metadata.get("authors_text") or None,  # ✅ new field
         "journal": metadata.get("journal"),
-        "year": int(metadata.get("year")) if metadata.get("year") else None,
+        "year": int(metadata["year"]) if metadata.get("year") else None,
         "fetched_at": datetime.datetime.utcnow().isoformat(),
     }
 
     # 3️⃣ Upsert into Supabase
     supabase.table("papers").upsert(row).execute()
 
-    # 4️⃣ Fetch final record to get UUID
+    # 4️⃣ Read back row to return Supabase UUID
     db_paper = (
         supabase.table("papers")
         .select("*")
@@ -110,6 +113,7 @@ def sync_paper(pmid: str):
 
     if not db_paper or not db_paper.data:
         raise HTTPException(
-            status_code=500, detail="Failed to read back paper")
+            status_code=500, detail="Failed to read back paper after upsert"
+        )
 
     return db_paper.data
