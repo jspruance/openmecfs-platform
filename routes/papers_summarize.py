@@ -1,4 +1,48 @@
 # routes/papers_summarize.py
+"""
+Open ME/CFS — AI Paper Summarization Route
+------------------------------------------------------------
+Purpose:
+    Generate structured AI summaries for biomedical papers 
+    already stored in Supabase. This converts raw abstracts 
+    into standardized evidence-rich representations.
+
+Why this exists:
+    - Adds mechanistic clarity to research papers
+    - Enables patient-friendly explanations
+    - Extracts mechanism & biomarker signals
+    - Feeds the evidence graph & subtype engine
+    - Reduces cognitive load for researchers & patients
+
+Data flow:
+    Supabase `papers` table → /papers/summarize/{pmid}
+        → GPT summary + mechanism tokens
+        → Save to `paper_summaries`
+
+Output includes:
+    ✅ One-sentence mechanistic headline
+    ✅ Technical research summary
+    ✅ Patient-friendly lay summary
+    ✅ Mechanism classes (immune, mito, vascular, neuro…)
+    ✅ Biomarkers (e.g., NK cells, IL-6, ATP)
+    ✅ Stored for UI & evidence graph
+
+Important:
+    This does *not* ingest papers. It only summarizes papers
+    already synced via:
+        POST /papers/sync/{pmid}
+
+Typical usage:
+    1) Sync paper metadata
+        POST /papers/sync/31452104
+
+    2) Generate structured AI summary
+        POST /papers/summarize/31452104
+
+This file = AI INTERPRETATION LAYER of the research engine.
+------------------------------------------------------------
+"""
+
 
 from fastapi import APIRouter, HTTPException
 from utils.db import supabase
