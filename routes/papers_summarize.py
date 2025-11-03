@@ -1,79 +1,46 @@
 # routes/papers_summarize.py
 """
-Open ME/CFS — AI Paper Summarization Route
-------------------------------------------------------------
-Purpose:
-    Generate structured AI summaries for biomedical papers 
-    already stored in Supabase. This converts raw abstracts 
-    into standardized evidence-rich representations.
-
-Why this exists:
-    - Adds mechanistic clarity to research papers
-    - Enables patient-friendly explanations
-    - Extracts mechanism & biomarker signals
-    - Feeds the evidence graph & subtype engine
-    - Reduces cognitive load for researchers & patients
-
-Data flow:
-    Supabase `papers` table → /papers/summarize/{pmid}
-        → GPT summary + mechanism tokens
-        → Save to `paper_summaries`
-
-Output includes:
-    ✅ One-sentence mechanistic headline
-    ✅ Technical research summary
-    ✅ Patient-friendly lay summary
-    ✅ Mechanism classes (immune, mito, vascular, neuro…)
-    ✅ Biomarkers (e.g., NK cells, IL-6, ATP)
-    ✅ Stored for UI & evidence graph
-
-Important:
-    This does *not* ingest papers. It only summarizes papers
-    already synced via:
-        POST /papers/sync/{pmid}
-
-Typical usage:
-    1) Sync paper metadata
-        POST /papers/sync/31452104
-
-    2) Generate structured AI summary
-        POST /papers/summarize/31452104
-
-This file = AI INTERPRETATION LAYER of the research engine.
-------------------------------------------------------------
+Open ME/CFS — AI Paper Summarization Router
+Generates structured mechanistic summaries for stored papers.
 """
-
 
 from fastapi import APIRouter, HTTPException
 from utils.db import supabase
-from utils.openai import client  # we'll create this next
+from utils.openai_client import client  # ✅ correct client
+import hashlib
 import datetime
 
 router = APIRouter(prefix="/papers", tags=["AI Summaries"])
 
-SYSTEM_PROMPT = """You are a biomedical research summarization model for ME/CFS.
-Goal: extract mechanistic insight, avoid speculation.
 
-Output MUST be valid JSON:
+SYSTEM_PROMPT = """
+You are a biomedical literature analyst for ME/CFS and post-viral disease research.
+Extract mechanistic insight without speculation.
+
+Return a JSON object:
 
 {
  "one_sentence": "...",
  "technical_summary": "...",
  "patient_summary": "...",
- "mechanisms": ["immune", "vascular", "mitochondrial", ...],
- "biomarkers": ["IL-6", "ATP", "NK cells", ...]
+ "mechanisms": ["immune", "mitochondrial", "vascular", "autonomic", "neurological", "endocrine"],
+ "biomarkers": ["IL-6", "ATP", "NK cells", "VEGF"],
+ "confidence": 0.00
 }
 
-Rules:
-- mechanisms: high-level buckets only
-- biomarkers: specific molecules/cell types
-- If unsure, return empty list.
+Mechanisms = high-level biological systems.
+Biomarkers = specific measurable molecules/cell types.
+If not present, return empty list.
 """
+
+
+def compute_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 @router.post("/summarize/{pmid}")
 def summarize_paper(pmid: str):
-    # pull paper
+    # 1️⃣ Get paper
     paper = (
         supabase.table("papers")
         .select("*")
@@ -84,23 +51,37 @@ def summarize_paper(pmid: str):
 
     if not paper or not getattr(paper, "data", None):
         raise HTTPException(
-            status_code=404, detail="Paper not found, sync first")
+            status_code=404, detail="Paper not found. Sync first.")
 
     paper = paper.data
-    text = (paper.get("abstract") or "").strip()
+    abstract = (paper.get("abstract") or "").strip()
+    title = (paper.get("title") or "").strip()
 
-    if not text:
-        raise HTTPException(status_code=400, detail="Paper has no abstract")
+    if not abstract:
+        raise HTTPException(status_code=400, detail="Paper has no abstract.")
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": text}
-    ]
+    input_text = title + "\n\n" + abstract
+    hash_value = compute_hash(input_text)
 
+    # 2️⃣ Skip if already summarized
+    exists = (
+        supabase.table("paper_summaries")
+        .select("*")
+        .eq("hash", hash_value)
+        .execute()
+    )
+
+    if exists.data:
+        return {"status": "cached", "pmid": pmid}
+
+    # 3️⃣ Call OpenAI
     try:
         resp = client.chat.completions.create(
             model="gpt-5",
-            messages=messages,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": input_text}
+            ],
             response_format={"type": "json_object"}
         )
     except Exception as e:
@@ -108,9 +89,9 @@ def summarize_paper(pmid: str):
 
     ai = resp.choices[0].message.parsed
 
-    # store in paper_summaries table
-    row = {
-        "paper_id": paper["id"],
+    # 4️⃣ Save to DB
+    supabase.table("paper_summaries").insert({
+        "paper_pmid": pmid,                     # ✅ matches schema
         "provider": "openai",
         "model": "gpt-5",
         "one_sentence": ai["one_sentence"],
@@ -118,13 +99,14 @@ def summarize_paper(pmid: str):
         "patient_summary": ai["patient_summary"],
         "mechanisms": ai.get("mechanisms", []),
         "biomarkers": ai.get("biomarkers", []),
-    }
+        "confidence": ai.get("confidence", None),
+        "hash": hash_value,
+        "created_at": datetime.datetime.utcnow().isoformat()
+    }).execute()
 
-    supabase.table("paper_summaries").insert(row).execute()
-
-    # update paper record timestamp
+    # 5️⃣ Update paper timestamp
     supabase.table("papers").update({
         "summarized_at": datetime.datetime.utcnow().isoformat()
     }).eq("pmid", pmid).execute()
 
-    return ai
+    return {"status": "done", "pmid": pmid, **ai}
