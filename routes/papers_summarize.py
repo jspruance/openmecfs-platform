@@ -9,6 +9,7 @@ from utils.db import supabase
 from utils.openai_client import client
 import hashlib
 import datetime
+import json
 
 router = APIRouter(prefix="/papers", tags=["AI Summaries"])
 
@@ -35,9 +36,9 @@ def compute_hash(text: str) -> str:
 
 
 @router.post("/summarize/{pmid}")
-def summarize_paper(pmid: str):
+async def summarize_paper(pmid: str):
 
-    # 1️⃣ Fetch paper
+    # 1️⃣ Fetch paper metadata
     paper = (
         supabase.table("papers")
         .select("*")
@@ -54,30 +55,29 @@ def summarize_paper(pmid: str):
     abstract = (paper.get("abstract") or "").strip()
     title = (paper.get("title") or "").strip()
 
-    # ✅ Abstract fallback logic
+    # ✅ Allow title-only summarization
     if abstract:
         input_text = f"{title}\n\n{abstract}"
     elif title:
         input_text = f"Title only (no abstract available): {title}"
     else:
-        return {"status": "no-text", "pmid": pmid, "message": "Paper has neither abstract nor title"}
+        return {"status": "no-text", "pmid": pmid, "message": "Paper has no title or abstract"}
 
-    # 2️⃣ Hash to avoid recompute
+    # 2️⃣ Avoid recompute
     hash_value = compute_hash(input_text)
-
-    exists = (
+    existing = (
         supabase.table("paper_summaries")
         .select("*")
         .eq("hash", hash_value)
         .execute()
     )
 
-    if exists.data:
+    if existing.data:
         return {"status": "cached", "pmid": pmid}
 
-    # 3️⃣ GPT call
+    # 3️⃣ Call OpenAI
     try:
-        resp = client.chat.completions.create(
+        resp = await client.chat.completions.create(
             model="gpt-5",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -85,12 +85,28 @@ def summarize_paper(pmid: str):
             ],
             response_format={"type": "json_object"}
         )
+
+        ai = resp.choices[0].message.parsed
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OpenAI error: {e}")
+        # Try to show raw text for debugging
+        raw = None
+        try:
+            raw = resp.choices[0].message.content
+        except:
+            pass
 
-    ai = resp.choices[0].message.parsed
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "OpenAI JSON parse failed",
+                "exception": str(e),
+                "pmid": pmid,
+                "raw_response": raw,
+            }
+        )
 
-    # 4️⃣ Save record
+    # 4️⃣ Write summary to DB
     supabase.table("paper_summaries").insert({
         "paper_pmid": pmid,
         "provider": "openai",
@@ -105,6 +121,7 @@ def summarize_paper(pmid: str):
         "created_at": datetime.datetime.utcnow().isoformat()
     }).execute()
 
+    # 5️⃣ Update paper timestamp
     supabase.table("papers").update({
         "summarized_at": datetime.datetime.utcnow().isoformat()
     }).eq("pmid", pmid).execute()
