@@ -28,6 +28,26 @@ def compute_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+async def store_graph_edges(pmid: str, mechanisms: list, biomarkers: list):
+    """Store mechanistic + biomarker graph edges for this paper"""
+    # paper -> mechanism
+    for m in mechanisms:
+        await supabase.table("paper_graph").insert({
+            "paper_pmid": pmid,
+            "mechanism": m,
+            "edge_type": "paper→mechanism"
+        }).execute()
+
+        # mechanism -> biomarker
+        for b in biomarkers:
+            await supabase.table("paper_graph").insert({
+                "paper_pmid": pmid,
+                "mechanism": m,
+                "biomarker": b,
+                "edge_type": "mechanism→biomarker"
+            }).execute()
+
+
 @router.post("/summarize/{pmid}")
 async def summarize_paper(pmid: str):
 
@@ -41,7 +61,8 @@ async def summarize_paper(pmid: str):
 
     if not paper or not paper.data:
         raise HTTPException(
-            status_code=404, detail="Paper not found. Sync first.")
+            status_code=404, detail="Paper not found. Sync first."
+        )
 
     paper = paper.data
     text = (paper.get("title") or "") + "\n\n" + (paper.get("abstract") or "")
@@ -50,6 +71,7 @@ async def summarize_paper(pmid: str):
     hash_value = compute_hash(text)
     existing = supabase.table("paper_summaries").select(
         "id").eq("hash", hash_value).execute()
+
     if existing.data:
         return {"status": "cached", "pmid": pmid}
 
@@ -75,8 +97,9 @@ async def summarize_paper(pmid: str):
             "trace": traceback.format_exc(),
         })
 
+    # ✅ Insert summary record
     supabase.table("paper_summaries").insert({
-        "paper_pmid": pmid,  # ✅ correct FK
+        "paper_pmid": pmid,
         "provider": "openai",
         "model": "gpt-5",
         "one_sentence": ai.get("one_sentence", ""),
@@ -89,9 +112,17 @@ async def summarize_paper(pmid: str):
         "created_at": datetime.datetime.utcnow().isoformat()
     }).execute()
 
+    # ✅ Update paper record
     supabase.table("papers").update({
         "summarized_at": datetime.datetime.utcnow().isoformat()
     }).eq("pmid", pmid).execute()
+
+    # ✅ Store mechanistic graph edges
+    await store_graph_edges(
+        pmid,
+        ai.get("mechanisms", []),
+        ai.get("biomarkers", [])
+    )
 
     return {"status": "done", "pmid": pmid, **ai}
 
@@ -107,7 +138,6 @@ async def get_summary(pmid: str):
         .execute()
     )
 
-    # No summary yet
     if not result.data:
         return {"status": "not summarized", "pmid": pmid}
 
