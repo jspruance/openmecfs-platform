@@ -50,7 +50,6 @@ async def summarize_paper(pmid: str):
     abstract = (paper.get("abstract") or "").strip()
     title = (paper.get("title") or "").strip()
 
-    # 2️⃣ Build summarization text
     if abstract:
         text = f"{title}\n\n{abstract}"
     elif title:
@@ -58,7 +57,7 @@ async def summarize_paper(pmid: str):
     else:
         return {"status": "no-text", "pmid": pmid}
 
-    # 3️⃣ Check cache via hash
+    # 2️⃣ Cache hash
     hash_value = compute_hash(text)
     existing = (
         supabase.table("paper_summaries")
@@ -69,7 +68,7 @@ async def summarize_paper(pmid: str):
     if existing.data:
         return {"status": "cached", "pmid": pmid}
 
-    # 4️⃣ OpenAI call
+    # 3️⃣ OpenAI call
     try:
         resp = await client.chat.completions.create(
             model="gpt-5",
@@ -80,30 +79,25 @@ async def summarize_paper(pmid: str):
             response_format={"type": "json_object"},
         )
 
-        # ✅ Try structured parse first (SDK v1)
         try:
             ai = resp.choices[0].message.parsed
         except:
-            # ✅ Fallback to manual JSON parsing
-            raw = resp.choices[0].message.content
-            ai = json.loads(raw)
+            ai = json.loads(resp.choices[0].message.content)
 
     except Exception as e:
-        # Detailed debug output to logs
-        error = traceback.format_exc()
         raise HTTPException(
             status_code=500,
             detail={
                 "error": "OpenAI call or JSON parse failed",
                 "exception": str(e),
-                "trace": error,
+                "trace": traceback.format_exc(),
                 "pmid": pmid
             }
         )
 
-    # 5️⃣ Store result in Supabase
+    # 4️⃣ Store summary
     supabase.table("paper_summaries").insert({
-        "paper_pmid": pmid,
+        "paper_id": paper["id"],  # ✅ FIXED FK
         "provider": "openai",
         "model": "gpt-5",
         "one_sentence": ai.get("one_sentence", ""),
@@ -116,7 +110,7 @@ async def summarize_paper(pmid: str):
         "created_at": datetime.datetime.utcnow().isoformat()
     }).execute()
 
-    # 6️⃣ Update timestamp on parent paper
+    # 5️⃣ Mark parent paper as summarized
     supabase.table("papers").update({
         "summarized_at": datetime.datetime.utcnow().isoformat()
     }).eq("pmid", pmid).execute()
