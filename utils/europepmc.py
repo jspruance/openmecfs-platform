@@ -29,11 +29,14 @@ def fetch_pmc_data(pmid: str):
 
     p = result[0]
 
+    authors_raw = p.get("authorString", "")
+    authors_list = authors_raw.split(", ") if authors_raw else []
+
     return {
         "title": p.get("title"),
         "abstract": p.get("abstractText"),
         "journal": p.get("journalTitle"),
-        "year": p.get("pubYear"),
-        # Ensure authors is always a list
-        "authors": p.get("authorString", "").split(", ") if p.get("authorString") else [],
+        "year": int(p.get("pubYear", 0)) if p.get("pubYear") else None,
+        "authors": authors_list,
+        "authors_text": authors_raw,  # ✅ store raw string too
     }
