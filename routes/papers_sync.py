@@ -1,8 +1,6 @@
-# routes/papers_sync.py
-
 from fastapi import APIRouter, HTTPException
 from utils.db import supabase
-from utils.europepmc import fetch_pmc_data
+from utils.europepmc import fetch_paper_by_pmid
 import asyncio
 
 router = APIRouter(prefix="/papers", tags=["Papers"])
@@ -38,41 +36,42 @@ async def sync_paper(pmid: str):
     print(f"[SYNC] Fetching from EuropePMC for PMID {pmid}")
 
     try:
-        # ensure coroutine works in sync FastAPI context
-        if asyncio.iscoroutinefunction(fetch_pmc_data):
-            data = await fetch_pmc_data(pmid)
+        if asyncio.iscoroutinefunction(fetch_paper_by_pmid):
+            data = await fetch_paper_by_pmid(pmid)
         else:
-            data = fetch_pmc_data(pmid)
+            data = fetch_paper_by_pmid(pmid)
     except Exception as e:
         print(f"[SYNC ERROR] EuropePMC fetch failed: {e}")
         raise HTTPException(status_code=500, detail="EuropePMC fetch failed")
 
     if not data:
         raise HTTPException(
-            status_code=404, detail=f"PMID {pmid} not found on EuropePMC")
+            status_code=404, detail=f"PMID {pmid} not found on EuropePMC"
+        )
 
-    # Normalize fields
+    # 3️⃣ Normalize + upsert
     payload = {
         "pmid": pmid,
         "title": (data.get("title") or "").strip(),
         "abstract": (data.get("abstract") or "").strip(),
         "journal": (data.get("journal") or "").strip(),
         "year": data.get("year") or None,
-        "authors": data.get("authors") if isinstance(data.get("authors"), list) else [data.get("authors")],
+        "authors": data.get("authors", []),
+        "authors_text": data.get("authors_text"),
     }
 
-    print(f"[SYNC] Inserting into Supabase... {payload}")
+    print(f"[SYNC] Upserting into Supabase... {payload}")
 
-    # 3️⃣ Insert into Supabase
     try:
-        res = supabase.table("papers").insert(payload).execute()
+        res = supabase.table("papers").upsert(payload).execute()
     except Exception as e:
-        print(f"[SYNC ERROR] Insert failed: {e}")
-        raise HTTPException(status_code=500, detail="DB insert failed")
+        print(f"[SYNC ERROR] Upsert failed: {e}")
+        raise HTTPException(status_code=500, detail="DB upsert failed")
 
     if not res or not res.data:
         raise HTTPException(
-            status_code=500, detail="Insert failed: no data returned")
+            status_code=500, detail="Upsert failed: no data returned"
+        )
 
     print(f"[SYNC] ✅ Saved paper {pmid}")
     return res.data[0]
