@@ -6,6 +6,7 @@ def fetch_paper_by_pmid(pmid: str):
     Fetch metadata for a PubMed paper from EuropePMC by PMID.
     Returns normalized fields ready for Supabase storage.
     """
+
     url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID:{pmid}&format=json"
 
     try:
@@ -31,16 +32,25 @@ def fetch_paper_by_pmid(pmid: str):
 
     p = result[0]
 
-    # Normalize authors
-    authors_raw = p.get("authorString") or ""
+    # ✅ Normalize authors
+    authors_raw = p.get("authorString", "") or ""
     authors_list = authors_raw.split(", ") if authors_raw else []
+
+    # ✅ Normalize year to integer if possible
+    year_raw = p.get("pubYear")
+    year = None
+    try:
+        if year_raw:
+            year = int(year_raw)
+    except:
+        year = None
 
     return {
         "pmid": pmid,
         "title": p.get("title") or "",
         "abstract": p.get("abstractText") or "",
         "journal": p.get("journalTitle") or "",
-        "year": int(p.get("pubYear")) if p.get("pubYear") and p.get("pubYear").isdigit() else None,
-        "authors": authors_list,          # ✅ array for DB JSON column
-        "authors_text": authors_raw,      # ✅ store raw string too (optional)
+        "year": year,
+        "authors": authors_list,    # ✅ JSON array for Supabase
+        "authors_text": authors_raw  # ✅ raw author string also stored
     }
