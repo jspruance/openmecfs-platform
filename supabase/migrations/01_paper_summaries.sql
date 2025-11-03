@@ -11,6 +11,8 @@ create table if not exists public.paper_summaries (
   model text not null default 'gpt-5',
 
   one_sentence text not null,
+  technical_summary text,
+  patient_summary text,
   mechanisms text[] not null default '{}',
   biomarkers text[] not null default '{}',
   confidence numeric default 0.0,

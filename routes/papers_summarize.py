@@ -94,3 +94,21 @@ async def summarize_paper(pmid: str):
     }).eq("pmid", pmid).execute()
 
     return {"status": "done", "pmid": pmid, **ai}
+
+
+@router.get("/summaries/{pmid}")
+async def get_summary(pmid: str):
+    result = (
+        supabase.table("paper_summaries")
+        .select("*")
+        .eq("paper_pmid", pmid)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    # No summary yet
+    if not result.data:
+        return {"status": "not summarized", "pmid": pmid}
+
+    return result.data[0]
