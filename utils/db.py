@@ -210,11 +210,16 @@ def get_datasets():
 # ------------------------------------------------------------
 
 
-def fetch_paper_by_id(paper_id: str):
-    """Fetch single paper record by UUID"""
+def fetch_paper_by_pmid(pmid: str):
+    """Fetch single paper record by PMID (papers table uses pmid as primary key, not id)"""
     res = supabase.table("papers").select(
-        "*").eq("id", paper_id).single().execute()
+        "*").eq("pmid", pmid).single().execute()
     return res.data
+
+# Deprecated alias - kept for backward compatibility if someone was using this
+def fetch_paper_by_id(pmid: str):
+    """Deprecated: Use fetch_paper_by_pmid instead. Papers table uses pmid as primary key."""
+    return fetch_paper_by_pmid(pmid)
 
 
 def find_summary_by_hash(hash_key: str):
@@ -229,10 +234,10 @@ def find_summary_by_hash(hash_key: str):
     return res.data
 
 
-def insert_paper_summary(paper_id: str, summary: dict, hash_key: str):
-    """Store LLM-generated mechanistic evidence for a paper"""
+def insert_paper_summary(pmid: str, summary: dict, hash_key: str):
+    """Store LLM-generated mechanistic evidence for a paper. Uses paper_pmid field (pmid value)."""
     payload = {
-        "paper_id": paper_id,
+        "paper_pmid": pmid,
         "provider": "openai",
         "model": summary.get("model", "gpt-5"),
         "one_sentence": summary["one_sentence"],
