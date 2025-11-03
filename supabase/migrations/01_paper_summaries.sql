@@ -5,7 +5,7 @@
 
 create table if not exists public.paper_summaries (
   id uuid primary key default gen_random_uuid(),
-  paper_id uuid not null references public.papers(id) on delete cascade,
+  paper_pmid text not null references public.papers(pmid) on delete cascade,
 
   provider text not null default 'openai',
   model text not null default 'gpt-5',
@@ -24,7 +24,7 @@ create table if not exists public.paper_summaries (
 
 -- Speed up lookup by paper
 create index if not exists idx_paper_summaries_paper_id
-  on public.paper_summaries (paper_id);
+  on public.paper_summaries (paper_pmid);
 
 -- Idempotency: ensure only one summary per paper hash
 create unique index if not exists idx_paper_summaries_hash

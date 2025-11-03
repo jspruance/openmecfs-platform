@@ -3,8 +3,8 @@
 create table if not exists public.paper_mechanisms (
   id uuid primary key default gen_random_uuid(),
 
-  -- Prefer paper_id if your `papers` table has an id column; keep nullable for compatibility.
-  paper_id uuid null references public.papers(id) on delete cascade,
+  -- Foreign key to papers table using pmid; keep nullable for compatibility.
+  paper_pmid text null references public.papers(pmid) on delete cascade,
 
   -- Always record the PMID explicitly.
   pmid text not null,

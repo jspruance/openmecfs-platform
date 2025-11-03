@@ -21,7 +21,7 @@ create table if not exists public.biomarker_nodes (
 create table if not exists public.mechanism_edges (
   id uuid primary key default gen_random_uuid(),
 
-  paper_id uuid not null references public.papers(id) on delete cascade,
+  paper_pmid text not null references public.papers(pmid) on delete cascade,
   mechanism_id uuid references public.mechanism_nodes(id) on delete set null,
   biomarker_id uuid references public.biomarker_nodes(id) on delete set null,
 
@@ -30,7 +30,7 @@ create table if not exists public.mechanism_edges (
 
 -- Speeds up graph traversal
 create index if not exists idx_mechanism_edges_paper_id
-  on public.mechanism_edges(paper_id);
+  on public.mechanism_edges(paper_pmid);
 
 create index if not exists idx_mechanism_edges_mechanism_id
   on public.mechanism_edges(mechanism_id);
