@@ -1,47 +1,95 @@
-# routes/evidence.py
-
 from fastapi import APIRouter, HTTPException
-from uuid import UUID
+from supabase import create_client
+from pydantic import BaseModel
 import hashlib
-from utils.openai_client import generate_evidence_summary
-from utils.db import fetch_paper_by_id, insert_paper_summary, find_summary_by_hash
+import os
+from datetime import datetime
+import openai
 
-router = APIRouter(prefix="/evidence", tags=["Evidence Engine"])
+router = APIRouter(prefix="/evidence", tags=["evidence"])
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
-@router.post("/papers/{paper_id}/generate")
-async def generate_evidence_for_paper(paper_id: UUID):
-    # 1️⃣ Get paper & abstract from DB
-    paper = await fetch_paper_by_id(paper_id)
+class EvidenceResponse(BaseModel):
+    status: str
+    mechanisms: list[str]
+    biomarkers: list[str]
+    confidence: float
+    summary: str
+
+
+def compute_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+@router.post("/papers/{pmid}/generate")
+async def generate_evidence(pmid: str):
+
+    # 1) Fetch paper record
+    result = supabase.table("papers").select(
+        "*").eq("pmid", pmid).single().execute()
+    paper = result.data
+
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    abstract = paper["abstract"]
-    if not abstract:
-        raise HTTPException(status_code=400, detail="Paper has no abstract")
+    title = paper.get("title", "")
+    abstract = paper.get("abstract", "")
+    input_text = f"{title}\n\n{abstract}"
 
-    # 2️⃣ Create hash (idempotency key)
-    hash_key = hashlib.sha256(abstract.encode("utf-8")).hexdigest()
+    # 2) Check if already computed
+    hash_value = compute_hash(input_text)
+    existing = supabase.table("paper_summaries").select(
+        "*").eq("hash", hash_value).execute()
 
-    # 3️⃣ See if we already have a summary
-    existing = await find_summary_by_hash(hash_key)
-    if existing:
-        return {
-            "status": "cached",
-            "summary": existing,
-        }
+    if existing.data:
+        return {"status": "cached"}
 
-    # 4️⃣ Generate evidence via LLM
-    summary = await generate_evidence_summary(abstract)
+    # 3) Call GPT-5
+    prompt = f"""
+You are a biomedical mechanistic reasoning model.
 
-    # 5️⃣ Persist to DB
-    saved = await insert_paper_summary(
-        paper_id=paper_id,
-        summary=summary,
-        hash_key=hash_key
+Paper:
+Title: {title}
+Abstract: {abstract}
+
+Extract:
+- one sentence mechanistic summary
+- key mechanisms (immune, mitochondrial, vascular, autonomic, metabolic, endocrine, neurological)
+- any biomarkers mentioned or implied
+- confidence 0–1
+
+Return JSON:
+{{
+ "summary": "...",
+ "mechanisms": [],
+ "biomarkers": [],
+ "confidence": 0.00
+}}
+    """
+
+    response = openai.chat.completions.create(
+        model="gpt-5",
+        messages=[{"role": "user", "content": prompt}]
     )
 
-    return {
-        "status": "generated",
-        "summary": saved
-    }
+    data = response.choices[0].message.content
+    parsed = eval(data)  # ✅ GPT returns clean JSON here
+
+    # 4) Insert row
+    supabase.table("paper_summaries").insert({
+        "paper_pmid": pmid,
+        "one_sentence": parsed["summary"],
+        "mechanisms": parsed["mechanisms"],
+        "biomarkers": parsed["biomarkers"],
+        "confidence": parsed["confidence"],
+        "hash": hash_value,
+        "created_at": datetime.utcnow().isoformat()
+    }).execute()
+
+    return {"status": "done", **parsed}
