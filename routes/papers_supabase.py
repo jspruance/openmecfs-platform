@@ -1,12 +1,16 @@
 # openmecfs-platform/routes/papers_supabase.py
-# serves the /research/subtypes page
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from utils.db import supabase
+from utils.europepmc import fetch_paper_by_pmid
+import datetime
 
 router = APIRouter(tags=["Papers (Supabase)"])
 
 
+# ============================================================
+# GET /papers → support subtypes + research explorer UI
+# ============================================================
 @router.get("/")
 def get_papers(
     sort: Optional[str] = Query("year"),
@@ -16,7 +20,7 @@ def get_papers(
     q: Optional[str] = None,
     year: Optional[int] = None,
     cluster: Optional[int] = None,
-    cluster_label: Optional[int] = None,  # ✅ support alt name
+    cluster_label: Optional[int] = None,
 ):
     try:
         offset = (page - 1) * limit
@@ -50,11 +54,8 @@ def get_papers(
         if year:
             query = query.eq("year", year)
 
-        # ✅ Filter by cluster
-        # Note: papers table uses 'cluster' column to match subtype_clusters.cluster_id
         cluster_id = cluster if cluster is not None else cluster_label
         if cluster_id is not None:
-            # Filter papers by cluster value
             query = query.eq("cluster", cluster_id)
 
         result = query.execute()
@@ -70,3 +71,46 @@ def get_papers(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error fetching papers: {str(e)}")
+
+
+# ============================================================
+# POST /papers/sync/{pmid}
+# Sync a paper into Supabase & return DB record (with UUID)
+# ============================================================
+@router.post("/sync/{pmid}")
+def sync_paper(pmid: str):
+    # 1️⃣ Fetch from Europe PMC
+    try:
+        metadata = fetch_paper_by_pmid(pmid)
+    except Exception:
+        raise HTTPException(
+            status_code=404, detail="Paper not found at EuropePMC")
+
+    # 2️⃣ Build DB object
+    row = {
+        "pmid": pmid,
+        "title": metadata.get("title"),
+        "abstract": metadata.get("abstract"),
+        "authors": metadata.get("authors", []),
+        "journal": metadata.get("journal"),
+        "year": metadata.get("year"),
+        "fetched_at": datetime.datetime.utcnow().isoformat(),
+    }
+
+    # 3️⃣ Upsert into Supabase
+    supabase.table("papers").upsert(row).execute()
+
+    # 4️⃣ Fetch final record to get UUID
+    db_paper = (
+        supabase.table("papers")
+        .select("*")
+        .eq("pmid", pmid)
+        .maybe_single()
+        .execute()
+    )
+
+    if not db_paper or not db_paper.data:
+        raise HTTPException(
+            status_code=500, detail="Failed to read back paper")
+
+    return db_paper.data
