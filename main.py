@@ -9,6 +9,7 @@ from routes.papers_sync import router as papers_sync_router
 
 from routes.embeddings import router as embeddings_router
 from routes.papers_summarize import router as summarize_router
+from routes.papers_mechanisms import router as mechanisms_router
 
 
 # ------------------------------------------------------------
@@ -78,6 +79,7 @@ app.include_router(papers_supabase.router, prefix="/papers-sb")
 app.include_router(papers_sync_router)
 
 app.include_router(embeddings_router)
+app.include_router(mechanisms_router)
 
 # ------------------------------------------------------------
 # 🔍 Root Route
