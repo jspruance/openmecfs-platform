@@ -1,9 +1,11 @@
-# utils/europepmc.py
-
 import requests
 
 
-def fetch_pmc_data(pmid: str):
+def fetch_paper_by_pmid(pmid: str):
+    """
+    Fetch metadata for a PubMed paper from EuropePMC by PMID.
+    Returns normalized fields ready for Supabase storage.
+    """
     url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=EXT_ID:{pmid}&format=json"
 
     try:
@@ -19,24 +21,26 @@ def fetch_pmc_data(pmid: str):
     try:
         data = r.json()
     except Exception as e:
-        print(f"[EuropePMC] Failed to parse JSON for PMID {pmid}: {e}")
+        print(f"[EuropePMC] JSON parse error for PMID {pmid}: {e}")
         return None
 
     result = data.get("resultList", {}).get("result", [])
     if not result:
-        print(f"[EuropePMC] No result found on EuropePMC for PMID {pmid}")
+        print(f"[EuropePMC] No result found for PMID {pmid}")
         return None
 
     p = result[0]
 
-    authors_raw = p.get("authorString", "")
+    # Normalize authors
+    authors_raw = p.get("authorString") or ""
     authors_list = authors_raw.split(", ") if authors_raw else []
 
     return {
-        "title": p.get("title"),
-        "abstract": p.get("abstractText"),
-        "journal": p.get("journalTitle"),
-        "year": int(p.get("pubYear", 0)) if p.get("pubYear") else None,
-        "authors": authors_list,
-        "authors_text": authors_raw,  # ✅ store raw string too
+        "pmid": pmid,
+        "title": p.get("title") or "",
+        "abstract": p.get("abstractText") or "",
+        "journal": p.get("journalTitle") or "",
+        "year": int(p.get("pubYear")) if p.get("pubYear") and p.get("pubYear").isdigit() else None,
+        "authors": authors_list,          # ✅ array for DB JSON column
+        "authors_text": authors_raw,      # ✅ store raw string too (optional)
     }
