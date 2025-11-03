@@ -10,6 +10,7 @@ from routes.papers_sync import router as papers_sync_router
 from routes.embeddings import router as embeddings_router
 from routes.papers_summarize import router as summarize_router
 from routes.papers_mechanisms import router as mechanisms_router
+from routes.evidence import router as evidence_router
 
 
 # ------------------------------------------------------------
@@ -80,6 +81,7 @@ app.include_router(papers_sync_router)
 
 app.include_router(embeddings_router)
 app.include_router(mechanisms_router)
+app.include_router(evidence_router)
 
 # ------------------------------------------------------------
 # 🔍 Root Route
