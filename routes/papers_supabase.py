@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from utils.db import supabase
-from utils.europepmc import fetch_paper_by_pmid
+from utils.europepmc import fetch_pmc_data
 import datetime
 
 router = APIRouter(tags=["Papers (Supabase)"])
@@ -80,9 +80,8 @@ def get_papers(
 @router.post("/sync/{pmid}")
 def sync_paper(pmid: str):
     # 1️⃣ Fetch from Europe PMC
-    try:
-        metadata = fetch_paper_by_pmid(pmid)
-    except Exception:
+    metadata = fetch_pmc_data(pmid)
+    if not metadata:
         raise HTTPException(
             status_code=404, detail="Paper not found at EuropePMC")
 
@@ -91,9 +90,9 @@ def sync_paper(pmid: str):
         "pmid": pmid,
         "title": metadata.get("title"),
         "abstract": metadata.get("abstract"),
-        "authors": metadata.get("authors", []),
+        "authors": metadata.get("authors") or [],
         "journal": metadata.get("journal"),
-        "year": metadata.get("year"),
+        "year": int(metadata.get("year")) if metadata.get("year") else None,
         "fetched_at": datetime.datetime.utcnow().isoformat(),
     }
 
