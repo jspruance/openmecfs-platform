@@ -100,8 +100,8 @@ def extract_mechanisms(pmid: str):
     # 4) Upsert into paper_mechanisms
     row = {
         "pmid": pmid,
-        # Use paper['id'] if your table has one; otherwise leave null
-        "paper_id": paper.get("id"),
+        # Foreign key to papers table using pmid
+        "paper_pmid": pmid,
         "categories": categories,
         "mechanisms": mechanisms,
         "biomarkers": biomarkers,

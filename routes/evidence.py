@@ -28,7 +28,7 @@ async def generate_evidence(pmid: str):
     # 1) Fetch paper record
     result = (
         supabase.table("papers")
-        .select("id, pmid, title, abstract")
+        .select("pmid, title, abstract")
         .eq("pmid", pmid)
         .maybe_single()
         .execute()
@@ -97,7 +97,7 @@ Return JSON ONLY in this format:
             status_code=500, detail=f"Model parsing failed: {e}")
 
     row = {
-        "paper_id": paper["id"],   # ✅ correct FK
+        "paper_pmid": pmid,   # ✅ correct FK
         "one_sentence": parsed["summary"],
         "mechanisms": parsed.get("mechanisms", []),
         "biomarkers": parsed.get("biomarkers", []),
