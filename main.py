@@ -8,6 +8,8 @@ from routes import papers, datasets, stats, cache, semantic, clusters, papers_su
 from routes.papers_sync import router as papers_sync_router
 
 from routes.embeddings import router as embeddings_router
+from routes.papers_summarize import router as summarize_router
+
 
 # ------------------------------------------------------------
 # 🚀 App Configuration
@@ -69,6 +71,7 @@ app.include_router(stats.router)
 app.include_router(cache.router)
 app.include_router(semantic.router)
 app.include_router(clusters.router)
+app.include_router(summarize_router)
 
 # ✅ Supabase papers mounted at /papers-sb
 app.include_router(papers_supabase.router, prefix="/papers-sb")
