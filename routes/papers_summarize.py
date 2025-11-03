@@ -1,5 +1,5 @@
 # routes/papers_summarize.py
-# test
+
 from fastapi import APIRouter, HTTPException
 from utils.db import supabase
 from utils.openai_client import client
@@ -21,8 +21,6 @@ Return VALID JSON with keys:
 - mechanisms (array)
 - biomarkers (array)
 - confidence (0 to 1)
-
-If information is absent, return empty lists/strings. NO extra fields. NO commentary.
 """
 
 
@@ -33,7 +31,6 @@ def compute_hash(text: str) -> str:
 @router.post("/summarize/{pmid}")
 async def summarize_paper(pmid: str):
 
-    # 1️⃣ Fetch paper metadata
     paper = (
         supabase.table("papers")
         .select("*")
@@ -47,28 +44,15 @@ async def summarize_paper(pmid: str):
             status_code=404, detail="Paper not found. Sync first.")
 
     paper = paper.data
-    abstract = (paper.get("abstract") or "").strip()
-    title = (paper.get("title") or "").strip()
+    text = (paper.get("title") or "") + "\n\n" + (paper.get("abstract") or "")
+    text = text.strip() or f"(No abstract) {paper.get('title', '')}"
 
-    if abstract:
-        text = f"{title}\n\n{abstract}"
-    elif title:
-        text = f"(No abstract available)\n{title}"
-    else:
-        return {"status": "no-text", "pmid": pmid}
-
-    # 2️⃣ Cache hash
     hash_value = compute_hash(text)
-    existing = (
-        supabase.table("paper_summaries")
-        .select("*")
-        .eq("hash", hash_value)
-        .execute()
-    )
+    existing = supabase.table("paper_summaries").select(
+        "id").eq("hash", hash_value).execute()
     if existing.data:
         return {"status": "cached", "pmid": pmid}
 
-    # 3️⃣ OpenAI call
     try:
         resp = await client.chat.completions.create(
             model="gpt-5",
@@ -85,19 +69,14 @@ async def summarize_paper(pmid: str):
             ai = json.loads(resp.choices[0].message.content)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "OpenAI call or JSON parse failed",
-                "exception": str(e),
-                "trace": traceback.format_exc(),
-                "pmid": pmid
-            }
-        )
+        raise HTTPException(500, {
+            "error": "OpenAI failure",
+            "exception": str(e),
+            "trace": traceback.format_exc(),
+        })
 
-    # 4️⃣ Store summary (✅ Correct FK)
     supabase.table("paper_summaries").insert({
-        "paper_id": paper["paper_id"],   # ✅ correct foreign key field
+        "paper_id": paper["id"],  # ✅ correct FK
         "provider": "openai",
         "model": "gpt-5",
         "one_sentence": ai.get("one_sentence", ""),
@@ -110,7 +89,6 @@ async def summarize_paper(pmid: str):
         "created_at": datetime.datetime.utcnow().isoformat()
     }).execute()
 
-    # 5️⃣ Mark parent paper as summarized
     supabase.table("papers").update({
         "summarized_at": datetime.datetime.utcnow().isoformat()
     }).eq("pmid", pmid).execute()
