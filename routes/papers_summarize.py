@@ -1,8 +1,4 @@
 # routes/papers_summarize.py
-"""
-Open ME/CFS — AI Paper Summarization Router
-Generates structured mechanistic summaries for stored papers.
-"""
 
 from fastapi import APIRouter, HTTPException
 from utils.db import supabase
@@ -13,21 +9,12 @@ import json
 
 router = APIRouter(prefix="/papers", tags=["AI Summaries"])
 
-
 SYSTEM_PROMPT = """
 You are a biomedical literature analyst for ME/CFS and post-viral disease research.
 Extract mechanistic insight without speculation.
 
-Return JSON:
-
-{
- "one_sentence": "...",
- "technical_summary": "...",
- "patient_summary": "...",
- "mechanisms": ["immune", "mitochondrial", "vascular", "autonomic", "neurological", "endocrine"],
- "biomarkers": ["IL-6", "ATP", "NK cells", "VEGF"],
- "confidence": 0.00
-}
+Return JSON with keys:
+one_sentence, technical_summary, patient_summary, mechanisms, biomarkers, confidence
 """
 
 
@@ -38,7 +25,7 @@ def compute_hash(text: str) -> str:
 @router.post("/summarize/{pmid}")
 async def summarize_paper(pmid: str):
 
-    # 1️⃣ Fetch paper metadata
+    # Fetch paper
     paper = (
         supabase.table("papers")
         .select("*")
@@ -47,74 +34,55 @@ async def summarize_paper(pmid: str):
         .execute()
     )
 
-    if not paper or not getattr(paper, "data", None):
-        raise HTTPException(
-            status_code=404, detail="Paper not found. Sync first.")
+    if not paper or not paper.data:
+        raise HTTPException(404, "Paper not found. Sync first.")
 
     paper = paper.data
     abstract = (paper.get("abstract") or "").strip()
     title = (paper.get("title") or "").strip()
 
-    # ✅ Allow title-only summarization
-    if abstract:
-        input_text = f"{title}\n\n{abstract}"
-    elif title:
-        input_text = f"Title only (no abstract available): {title}"
-    else:
-        return {"status": "no-text", "pmid": pmid, "message": "Paper has no title or abstract"}
+    # Fallback for title-only papers
+    text = f"{title}\n\n{abstract}" if abstract else f"(No abstract) {title}"
+    hash_value = compute_hash(text)
 
-    # 2️⃣ Avoid recompute
-    hash_value = compute_hash(input_text)
+    # Skip if already summarized
     existing = (
         supabase.table("paper_summaries")
         .select("*")
         .eq("hash", hash_value)
         .execute()
     )
-
     if existing.data:
         return {"status": "cached", "pmid": pmid}
 
-    # 3️⃣ Call OpenAI
+    # ✅ OpenAI call (async)
     try:
-        resp = await client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-5",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": input_text}
+                {"role": "user", "content": text}
             ],
             response_format={"type": "json_object"}
         )
 
-        raw = resp.choices[0].message.content  # ✅ raw json string
-        ai = json.loads(raw)                  # ✅ manually parse
+        # SDK v1 "parsed" helper (when present)
+        try:
+            ai = response.choices[0].message.parsed
+        except:
+            ai = json.loads(response.choices[0].message.content)
 
     except Exception as e:
-        # fallback try to extract raw content for debugging
-        raw = None
-        try:
-            raw = resp.choices[0].message.content
-        except:
-            pass
+        raise HTTPException(500, f"OpenAI failed: {e}")
 
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "OpenAI JSON parse failed",
-                "exception": str(e),
-                "pmid": pmid,
-                "raw_response": raw,
-            }
-        )
-
-    # 4️⃣ Write summary to DB
+    # ✅ Store result
     supabase.table("paper_summaries").insert({
         "paper_pmid": pmid,
         "provider": "openai",
         "model": "gpt-5",
-        "one_sentence": ai["one_sentence"],
-        "technical_summary": ai["technical_summary"],
-        "patient_summary": ai["patient_summary"],
+        "one_sentence": ai.get("one_sentence", ""),
+        "technical_summary": ai.get("technical_summary", ""),
+        "patient_summary": ai.get("patient_summary", ""),
         "mechanisms": ai.get("mechanisms", []),
         "biomarkers": ai.get("biomarkers", []),
         "confidence": ai.get("confidence", None),
@@ -122,7 +90,6 @@ async def summarize_paper(pmid: str):
         "created_at": datetime.datetime.utcnow().isoformat()
     }).execute()
 
-    # 5️⃣ Update paper timestamp
     supabase.table("papers").update({
         "summarized_at": datetime.datetime.utcnow().isoformat()
     }).eq("pmid", pmid).execute()
