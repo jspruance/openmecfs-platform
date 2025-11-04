@@ -1,62 +1,33 @@
+# routes/graph_global.py
 from fastapi import APIRouter
 from utils.db import supabase
-from collections import defaultdict
 
-# ✅ Mechanism ontology mapping
-ONTOLOGY = {
-    "Immune dysregulation": [
-        "immune", "t cell", "b cell", "nk cell",
-        "autoimmunity", "cytokine", "inflammation"
-    ],
-    "Mitochondrial impairment": [
-        "mitochondria", "mitochondrial", "atp", "oxidative phosphorylation",
-        "energy metabolism"
-    ],
-    "Vascular / Endothelial dysfunction": [
-        "endothelial", "vascular", "blood flow", "perfusion", "microcirculation"
-    ],
-    "Autonomic dysfunction (POTS/ANS)": [
-        "autonomic", "pots", "orthostatic", "adrenergic", "heart rate"
-    ],
-    "Oxidative stress / Redox imbalance": [
-        "oxidative", "radical", "nitrosative", "ros", "redox"
-    ],
-    "Viral / Immune Trigger": [
-        "ebv", "virus", "viral", "infection", "post-viral"
-    ],
-    "Metabolic dysfunction": [
-        "metabolism", "metabolic", "glucose", "lactate", "pyruvate"
-    ]
+router = APIRouter(prefix="/graph", tags=["graph"])
+
+# Core ME/CFS mechanism families
+MECH_GROUPS = {
+    "immune": ["immune", "inflammation", "cytokine", "t-cell", "autoimmune"],
+    "mitochondrial": ["mito", "oxidative", "redox", "energy", "metabolic"],
+    "vascular": ["endothelial", "vascular", "microclot", "blood flow"],
+    "autonomic": ["dysautonomia", "pots", "autonomic", "orthostatic"],
+    "neuroinflammation": ["neuro", "brain", "microglia", "neuroinflammation"],
+    "viral": ["viral", "persistent", "post-viral", "ebv", "hhv6"],
 }
 
 
-def canonicalize(mech: str):
-    m = mech.lower().strip()
-
-    # Ignore ultra-long & nonsense strings
-    if len(m) > 64:
-        return None
-
-    for canonical, variants in ONTOLOGY.items():
-        for v in variants:
-            if v.lower() in m:
-                return canonical
-
-    return None  # drop unmatched noisy terms
-
-
-router = APIRouter(prefix="/graph", tags=["graph"])
+def categorize_mech(mech: str):
+    mech_l = mech.lower()
+    for group, keywords in MECH_GROUPS.items():
+        if any(k in mech_l for k in keywords):
+            return group
+    return "other"
 
 
 @router.get("/global")
 def global_graph(limit: int = 300):
-    """
-    Returns global graph: papers ↔ mechanisms (canonicalized)
-    """
-
     res = (
         supabase.table("paper_summaries")
-        .select("paper_pmid, mechanisms")
+        .select("paper_pmid, mechanisms, one_sentence, confidence")
         .limit(limit)
         .execute()
     )
@@ -65,39 +36,57 @@ def global_graph(limit: int = 300):
     links = []
     seen = set()
 
+    # Add mechanism hubs first
+    for mech_group in MECH_GROUPS.keys():
+        hub_id = f"hub:{mech_group}"
+        nodes.append({
+            "id": hub_id,
+            "label": mech_group.title(),
+            "type": "hub"
+        })
+        seen.add(hub_id)
+
+    awaiting = []  # orphan papers (no mechanism)
+
     for row in res.data or []:
         pmid = row.get("paper_pmid")
-        raw_mechs = row.get("mechanisms") or []
+        mechs = row.get("mechanisms") or []
+        sentence = row.get("one_sentence", "")
+        confidence = row.get("confidence", None)
 
         if not pmid:
             continue
 
-        # ✅ Paper node
         if pmid not in seen:
-            nodes.append({"id": pmid, "label": pmid, "type": "paper"})
+            nodes.append({
+                "id": pmid,
+                "label": pmid,
+                "title": sentence[:90] + "…" if sentence else "",
+                "confidence": confidence,
+                "type": "paper"
+            })
             seen.add(pmid)
 
-        for mech in raw_mechs:
+        if not mechs:
+            awaiting.append(pmid)
+            continue
+
+        for mech in mechs:
             mech = mech.strip()
             if not mech:
                 continue
 
-            canonical = canonicalize(mech)
-            if not canonical:
-                continue  # skip noise
-
-            if canonical not in seen:
-                nodes.append({
-                    "id": canonical,
-                    "label": canonical,
-                    "type": "mechanism"
-                })
-                seen.add(canonical)
+            group = categorize_mech(mech)
+            hub_id = f"hub:{group}"
 
             links.append({
                 "source": pmid,
-                "target": canonical,
-                "type": "paper-mechanism"
+                "target": hub_id,
+                "type": "paper→mechanism"
             })
 
-    return {"nodes": nodes, "links": links}
+    return {
+        "nodes": nodes,
+        "links": links,
+        "awaiting": awaiting
+    }
