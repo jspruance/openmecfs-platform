@@ -11,7 +11,7 @@ import re
 
 router = APIRouter(prefix="/papers", tags=["AI Summaries"])
 
-# ✅ Controlled mechanism ontology
+# ✅ Mechanism ontology
 VALID_MECHANISMS = {
     "immune dysregulation",
     "mitochondrial dysfunction",
@@ -49,9 +49,9 @@ NEUROINFLAMMATION,
 MICROBIOME DYSBIOSIS,
 ENERGY METABOLISM ABNORMALITIES
 
-- Biomarkers must be real biological markers (proteins, metabolites, immune markers).
+- Biomarkers must be real biological markers.
 - Do NOT invent biomarkers.
-- Keep strings clean, short, standardized.
+- Return JSON only.
 """
 
 
@@ -60,7 +60,6 @@ def compute_hash(text: str) -> str:
 
 
 def clean_list(items):
-    """Normalize and validate list entries"""
     cleaned = []
     for x in items or []:
         if not isinstance(x, str):
@@ -72,20 +71,22 @@ def clean_list(items):
         if len(x) < 2:
             continue
         cleaned.append(x)
-    return list(dict.fromkeys(cleaned))  # unique + keep order
+    return list(dict.fromkeys(cleaned))
+
+# ✅ FIX: this function should NOT be async, supabase is sync
 
 
-async def store_graph(pmid: str, mechs: list, biomarkers: list):
+def store_graph(pmid: str, mechs: list, biomarkers: list):
     """Store paper → mechanism → biomarker edges"""
     for m in mechs:
-        await supabase.table("paper_graph").insert({
+        supabase.table("paper_graph").insert({
             "paper_pmid": pmid,
             "mechanism": m,
             "edge_type": "paper→mechanism",
         }).execute()
 
         for b in biomarkers:
-            await supabase.table("paper_graph").insert({
+            supabase.table("paper_graph").insert({
                 "paper_pmid": pmid,
                 "mechanism": m,
                 "biomarker": b,
@@ -130,12 +131,9 @@ async def summarize_paper(pmid: str):
         raise HTTPException(
             500, {"error": str(e), "trace": traceback.format_exc()})
 
-    # ✅ normalize mechanisms
-    mechs_raw = clean_list(ai.get("mechanisms")
-                           or [])
+    # ✅ normalize mechanisms & biomarkers
+    mechs_raw = clean_list(ai.get("mechanisms") or [])
     mechs = [m.lower() for m in mechs_raw if m.lower() in VALID_MECHANISMS]
-
-    # ✅ clean biomarkers
     biomarkers = clean_list(ai.get("biomarkers"))
 
     # ✅ store summary
@@ -157,9 +155,9 @@ async def summarize_paper(pmid: str):
         "summarized_at": datetime.datetime.utcnow().isoformat()
     }).eq("pmid", pmid).execute()
 
-    await store_graph(pmid, mechs, biomarkers)
+    # ✅ FIX: no await
+    store_graph(pmid, mechs, biomarkers)
 
-    # ✅ return clean data
     return {
         "status": "done",
         "pmid": pmid,
