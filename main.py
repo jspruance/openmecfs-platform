@@ -12,6 +12,7 @@ from routes.papers_summarize import router as summarize_router
 from routes.papers_mechanisms import router as mechanisms_router
 from routes.evidence import router as evidence_router
 from routes import graph
+from routes import stats_biomarkers
 
 # ------------------------------------------------------------
 # 🚀 App Configuration
@@ -83,7 +84,7 @@ app.include_router(embeddings_router)
 app.include_router(mechanisms_router)
 app.include_router(evidence_router)
 app.include_router(graph.router)
-
+app.include_router(stats_biomarkers.router)
 # ------------------------------------------------------------
 # 🔍 Root Route
 # ------------------------------------------------------------
