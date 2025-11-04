@@ -7,20 +7,51 @@ import hashlib
 import datetime
 import json
 import traceback
+import re
 
 router = APIRouter(prefix="/papers", tags=["AI Summaries"])
 
-SYSTEM_PROMPT = """
-You are an expert biomedical research analyst specializing in ME/CFS and post-viral illness.
-Return a structured mechanistic summary ONLY based on the text provided.
+# ✅ Controlled mechanism ontology
+VALID_MECHANISMS = {
+    "immune dysregulation",
+    "mitochondrial dysfunction",
+    "oxidative stress",
+    "vascular / endothelial dysfunction",
+    "autonomic dysfunction / POTS",
+    "viral persistence",
+    "neuroinflammation",
+    "microbiome dysbiosis",
+    "energy metabolism abnormalities",
+}
 
-Return VALID JSON with keys:
+SYSTEM_PROMPT = """
+You are an expert biomedical research analyst specializing in ME/CFS.
+
+Return STRICT JSON only with:
+
 - one_sentence
 - technical_summary
 - patient_summary
-- mechanisms (array)
-- biomarkers (array)
-- confidence (0 to 1)
+- mechanisms (array of strings)
+- biomarkers (array of strings)
+- confidence (0-1 float)
+
+Rules:
+- Choose mechanisms ONLY from this list:
+
+IMMUNE DYSREGULATION,
+MITOCHONDRIAL DYSFUNCTION,
+OXIDATIVE STRESS,
+VASCULAR / ENDOTHELIAL DYSFUNCTION,
+AUTONOMIC DYSFUNCTION / POTS,
+VIRAL PERSISTENCE,
+NEUROINFLAMMATION,
+MICROBIOME DYSBIOSIS,
+ENERGY METABOLISM ABNORMALITIES
+
+- Biomarkers must be real biological markers (proteins, metabolites, immune markers).
+- Do NOT invent biomarkers.
+- Keep strings clean, short, standardized.
 """
 
 
@@ -28,41 +59,47 @@ def compute_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-async def store_graph_edges(pmid: str, mechanisms: list, biomarkers: list):
-    """Store mechanistic + biomarker graph edges for this paper"""
-    # paper -> mechanism
-    for m in mechanisms:
+def clean_list(items):
+    """Normalize and validate list entries"""
+    cleaned = []
+    for x in items or []:
+        if not isinstance(x, str):
+            continue
+        x = x.strip()
+        if not x:
+            continue
+        x = re.sub(r"[^a-zA-Z0-9\- /]", "", x)
+        if len(x) < 2:
+            continue
+        cleaned.append(x)
+    return list(dict.fromkeys(cleaned))  # unique + keep order
+
+
+async def store_graph(pmid: str, mechs: list, biomarkers: list):
+    """Store paper → mechanism → biomarker edges"""
+    for m in mechs:
         await supabase.table("paper_graph").insert({
             "paper_pmid": pmid,
             "mechanism": m,
-            "edge_type": "paper→mechanism"
+            "edge_type": "paper→mechanism",
         }).execute()
 
-        # mechanism -> biomarker
         for b in biomarkers:
             await supabase.table("paper_graph").insert({
                 "paper_pmid": pmid,
                 "mechanism": m,
                 "biomarker": b,
-                "edge_type": "mechanism→biomarker"
+                "edge_type": "mechanism→biomarker",
             }).execute()
 
 
 @router.post("/summarize/{pmid}")
 async def summarize_paper(pmid: str):
 
-    paper = (
-        supabase.table("papers")
-        .select("*")
-        .eq("pmid", pmid)
-        .maybe_single()
-        .execute()
-    )
-
+    paper = supabase.table("papers").select(
+        "*").eq("pmid", pmid).maybe_single().execute()
     if not paper or not paper.data:
-        raise HTTPException(
-            status_code=404, detail="Paper not found. Sync first."
-        )
+        raise HTTPException(404, "Paper not found. Sync first.")
 
     paper = paper.data
     text = (paper.get("title") or "") + "\n\n" + (paper.get("abstract") or "")
@@ -71,7 +108,6 @@ async def summarize_paper(pmid: str):
     hash_value = compute_hash(text)
     existing = supabase.table("paper_summaries").select(
         "id").eq("hash", hash_value).execute()
-
     if existing.data:
         return {"status": "cached", "pmid": pmid}
 
@@ -91,13 +127,18 @@ async def summarize_paper(pmid: str):
             ai = json.loads(resp.choices[0].message.content)
 
     except Exception as e:
-        raise HTTPException(500, {
-            "error": "OpenAI failure",
-            "exception": str(e),
-            "trace": traceback.format_exc(),
-        })
+        raise HTTPException(
+            500, {"error": str(e), "trace": traceback.format_exc()})
 
-    # ✅ Insert summary record
+    # ✅ normalize mechanisms
+    mechs_raw = clean_list(ai.get("mechanisms")
+                           or [])
+    mechs = [m.lower() for m in mechs_raw if m.lower() in VALID_MECHANISMS]
+
+    # ✅ clean biomarkers
+    biomarkers = clean_list(ai.get("biomarkers"))
+
+    # ✅ store summary
     supabase.table("paper_summaries").insert({
         "paper_pmid": pmid,
         "provider": "openai",
@@ -105,40 +146,24 @@ async def summarize_paper(pmid: str):
         "one_sentence": ai.get("one_sentence", ""),
         "technical_summary": ai.get("technical_summary", ""),
         "patient_summary": ai.get("patient_summary", ""),
-        "mechanisms": ai.get("mechanisms", []),
-        "biomarkers": ai.get("biomarkers", []),
-        "confidence": ai.get("confidence", None),
+        "mechanisms": mechs,
+        "biomarkers": biomarkers,
+        "confidence": ai.get("confidence"),
         "hash": hash_value,
         "created_at": datetime.datetime.utcnow().isoformat()
     }).execute()
 
-    # ✅ Update paper record
     supabase.table("papers").update({
         "summarized_at": datetime.datetime.utcnow().isoformat()
     }).eq("pmid", pmid).execute()
 
-    # ✅ Store mechanistic graph edges
-    await store_graph_edges(
-        pmid,
-        ai.get("mechanisms", []),
-        ai.get("biomarkers", [])
-    )
+    await store_graph(pmid, mechs, biomarkers)
 
-    return {"status": "done", "pmid": pmid, **ai}
-
-
-@router.get("/summaries/{pmid}")
-async def get_summary(pmid: str):
-    result = (
-        supabase.table("paper_summaries")
-        .select("*")
-        .eq("paper_pmid", pmid)
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-
-    if not result.data:
-        return {"status": "not summarized", "pmid": pmid}
-
-    return result.data[0]
+    # ✅ return clean data
+    return {
+        "status": "done",
+        "pmid": pmid,
+        **ai,
+        "mechanisms": mechs,
+        "biomarkers": biomarkers
+    }
