@@ -5,26 +5,36 @@ from utils.db import supabase
 router = APIRouter(prefix="/biomarkers", tags=["Biomarkers"])
 
 
-# ✅ FIXED: Added leading slash so FastAPI registers GET /biomarkers
 @router.get("/")
 def list_biomarkers():
     """List biomarkers and counts of supporting papers."""
-    res = (
-        supabase.table("paper_graph")
-        .select("biomarker, mechanism, paper_pmid")
-        .eq("edge_type", "mechanism→biomarker")
-        .execute()
-    )
+    try:
+        res = (
+            supabase.table("paper_graph")
+            .select("biomarker, mechanism, paper_pmid, edge_type")
+            .execute()
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Database error: {str(e)}")
 
     if not res.data:
-        raise HTTPException(404, "No biomarkers found.")
+        raise HTTPException(status_code=404, detail="No biomarkers found.")
 
     counts = {}
     for r in res.data:
-        bio = r["biomarker"]
+        if not r:
+            continue
+        bio = r.get("biomarker")
         mech = r.get("mechanism")
+        edge = (r.get("edge_type") or "").lower()
+
+        # include both old and new naming variants
+        if edge not in ["mechanism→biomarker", "mechanism->biomarker"]:
+            continue
         if not bio:
             continue
+
         if bio not in counts:
             counts[bio] = {"count": 0, "mechanisms": set()}
         counts[bio]["count"] += 1
@@ -44,4 +54,7 @@ def list_biomarkers():
         reverse=True,
     )
 
+    if not biomarkers:
+        raise HTTPException(
+            status_code=404, detail="No biomarker edges found.")
     return biomarkers
