@@ -30,7 +30,6 @@ def list_biomarkers():
         if mech:
             counts[bio]["mechanisms"].add(mech)
 
-    # Flatten + sort by descending count
     biomarkers = sorted(
         [
             {
