@@ -5,7 +5,8 @@ from utils.db import supabase
 router = APIRouter(prefix="/biomarkers", tags=["Biomarkers"])
 
 
-@router.get("")
+# ✅ FIXED: Added leading slash so FastAPI registers GET /biomarkers
+@router.get("/")
 def list_biomarkers():
     """List biomarkers and counts of supporting papers."""
     res = (
