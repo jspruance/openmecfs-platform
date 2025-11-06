@@ -6,7 +6,6 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 # Routes
 from routes import papers, datasets, stats, cache, semantic, clusters, papers_supabase
 from routes.papers_sync import router as papers_sync_router
-
 from routes.embeddings import router as embeddings_router
 from routes.papers_summarize import router as summarize_router
 from routes.papers_mechanisms import router as mechanisms_router
@@ -25,9 +24,8 @@ app = FastAPI(
     version="0.1.2",
 )
 
-
 # ------------------------------------------------------------
-# 🌐 CORS (FIRST middleware)
+# 🌐 CORS
 # ------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -59,15 +57,6 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# 🌐 Manual CORS preflight fallback
-# ------------------------------------------------------------
-
-
-@app.options("/{rest_of_path:path}")
-async def preflight_handler(rest_of_path: str):
-    return Response(status_code=200)
-
-# ------------------------------------------------------------
 # 📚 Routes
 # ------------------------------------------------------------
 app.include_router(papers.router)
@@ -88,7 +77,7 @@ app.include_router(evidence_router)
 app.include_router(graph.router)
 app.include_router(stats_biomarkers.router)
 app.include_router(graph_global_router)
-app.include_router(biomarkers.router)
+app.include_router(biomarkers.router)  # ✅ Biomarkers route now fully active
 
 # ------------------------------------------------------------
 # 🔍 Root Route
@@ -109,6 +98,7 @@ def root():
             "/papers/meta",
             "/health",
             "/embeddings",
+            "/biomarkers",  # ✅ Add to root listing
         ],
     }
 
@@ -128,5 +118,6 @@ def health_check():
 if __name__ == "__main__":
     import uvicorn
     import os
+
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
