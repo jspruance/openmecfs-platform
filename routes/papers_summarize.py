@@ -93,6 +93,26 @@ def store_graph(pmid: str, mechs: list, biomarkers: list):
                 "edge_type": "mechanism→biomarker",
             }).execute()
 
+# ✅ Add this GET endpoint (for frontend to retrieve existing summaries)
+
+
+@router.get("/summaries/{pmid}")
+def get_summary(pmid: str):
+    """Return the most recent AI summary for a given paper."""
+    res = (
+        supabase.table("paper_summaries")
+        .select("*")
+        .eq("paper_pmid", pmid)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if not res.data:
+        raise HTTPException(404, "No summary found for this paper.")
+
+    return res.data[0]
+
 
 @router.post("/summarize/{pmid}")
 async def summarize_paper(pmid: str):
