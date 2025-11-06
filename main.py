@@ -14,6 +14,7 @@ from routes.evidence import router as evidence_router
 from routes import graph
 from routes import stats_biomarkers
 from routes.graph_global import router as graph_global_router
+from routes import biomarkers
 
 # ------------------------------------------------------------
 # 🚀 App Configuration
@@ -87,6 +88,7 @@ app.include_router(evidence_router)
 app.include_router(graph.router)
 app.include_router(stats_biomarkers.router)
 app.include_router(graph_global_router)
+app.include_router(biomarkers.router)
 
 # ------------------------------------------------------------
 # 🔍 Root Route
