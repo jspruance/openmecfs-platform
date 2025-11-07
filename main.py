@@ -15,6 +15,7 @@ from routes import stats_biomarkers
 from routes.graph_global import router as graph_global_router
 from routes import biomarkers
 from routes import biomarkers_graph
+from routes import ai_hypotheses
 
 # ------------------------------------------------------------
 # 🚀 App Configuration
@@ -80,7 +81,7 @@ app.include_router(stats_biomarkers.router)
 app.include_router(graph_global_router)
 app.include_router(biomarkers.router)
 app.include_router(biomarkers_graph.router)
-
+app.include_router(ai_hypotheses.router)
 # ------------------------------------------------------------
 # 🔍 Root Route
 # ------------------------------------------------------------
