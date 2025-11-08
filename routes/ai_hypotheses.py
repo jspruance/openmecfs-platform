@@ -1,12 +1,14 @@
-# routes/ai_hypotheses.py
 from fastapi import APIRouter, HTTPException
 from supabase import create_client, Client
 from openai import OpenAI
 import os
 import uuid
+import re
 import json
-import traceback
 
+# --------------------------------------------------------------------
+# 🧠 Initialization
+# --------------------------------------------------------------------
 router = APIRouter()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -17,97 +19,127 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
 
+# --------------------------------------------------------------------
+# 🔍 Simple text normalization + deduplication
+# --------------------------------------------------------------------
+def normalize_title(title: str) -> str:
+    if not title:
+        return ""
+    t = title.lower()
+    t = re.sub(r"[^a-z0-9 ]+", "", t)
+    t = re.sub(r"\b(me/cfs|mecfs|chronic fatigue syndrome)\b", "", t)
+    t = re.sub(r"\s+", " ", t)
+    return t.strip()
+
+
+def deduplicate_hypotheses(hypotheses: list) -> list:
+    seen = set()
+    unique = []
+    for h in hypotheses:
+        key = normalize_title(h.get("title", ""))
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(h)
+    return unique
+
+
+# --------------------------------------------------------------------
+# 🚀 Combined Hypotheses Endpoint
+# --------------------------------------------------------------------
 @router.get("/hypotheses")
 async def get_ai_hypotheses():
+    """
+    Returns both:
+      1. Seeded hypotheses stored in Supabase (ai_hypotheses table)
+      2. Live AI-generated hypotheses derived from paper_summaries
+         (with deduplication)
+    """
     try:
-        print("🧠 /ai/hypotheses endpoint hit")
-
+        # ----------------------------------------------------------------
+        # 1️⃣ Pull existing hypotheses (seeded or previously saved)
+        # ----------------------------------------------------------------
         seeded = (
             supabase.table("ai_hypotheses")
             .select("*")
             .order("created_at", desc=True)
             .execute()
             .data
-        ) or []
-        print(f"Retrieved {len(seeded)} seeded hypotheses.")
+        )
 
+        # ----------------------------------------------------------------
+        # 2️⃣ Gather recent paper summaries
+        # ----------------------------------------------------------------
         summaries = (
             supabase.table("paper_summaries")
             .select("one_sentence")
             .limit(40)
             .execute()
             .data
-        ) or []
+        )
         if not summaries:
-            print("⚠️ No summaries found.")
-            return seeded
+            return deduplicate_hypotheses(seeded or [])
 
         text_corpus = "\n".join(f"- {s['one_sentence']}" for s in summaries)
 
+        # ----------------------------------------------------------------
+        # 3️⃣ Ask GPT for new hypotheses
+        # ----------------------------------------------------------------
         prompt = f"""
         You are a biomedical research AI specializing in ME/CFS.
         Review the following study summaries and propose 3 new causal hypotheses
         linking biological mechanisms and biomarkers.
 
-        Each hypothesis must be valid JSON with:
-        title, summary, confidence (0–1),
-        mechanisms[], biomarkers[], citations[].
+        Each hypothesis must be a valid JSON object with:
+          title (string),
+          summary (string),
+          confidence (float 0–1),
+          mechanisms (array of strings),
+          biomarkers (array of strings),
+          citations (array of short references).
 
-        Return a JSON array (not text).
         Summaries:
         {text_corpus}
         """
 
-        print("Sending prompt to OpenAI...")
         completion = openai.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
+            messages=[
+                {"role": "system", "content": "You are a biomedical AI assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+            max_tokens=900,
         )
-        content = completion.choices[0].message.content.strip()
 
-        ai_generated = []
         try:
-            ai_generated = json.loads(
-                content[content.find("["):content.rfind("]")+1])
-        except Exception as e:
-            print("⚠️ Parsing error:", e)
+            raw_output = completion.choices[0].message.content
+            ai_generated = json.loads(raw_output)
+            if isinstance(ai_generated, dict) and "hypotheses" in ai_generated:
+                ai_generated = ai_generated["hypotheses"]
+        except Exception:
             ai_generated = []
 
-        saved_titles = {h["title"].lower().strip()
-                        for h in seeded if h.get("title")}
-        new_hypotheses = []
-
+        # ----------------------------------------------------------------
+        # 4️⃣ Normalize + ensure fields + UUIDs
+        # ----------------------------------------------------------------
         for h in ai_generated:
-            title = h.get("title", "").strip()
-            if not title or title.lower() in saved_titles:
-                continue
+            h["id"] = str(uuid.uuid4())
+            h["confidence"] = (
+                float(h.get("confidence", 0.5))
+                if isinstance(h.get("confidence"), (int, float))
+                else 0.5
+            )
 
-            new_hypotheses.append({
-                "id": str(uuid.uuid4()),
-                "title": title,
-                "summary": h.get("summary", ""),
-                "confidence": float(h.get("confidence", 0.5)),
-                "mechanisms": h.get("mechanisms", []),
-                "biomarkers": h.get("biomarkers", []),
-                "citations": h.get("citations", []),
-                "source": "AI"
-            })
+        # ----------------------------------------------------------------
+        # 5️⃣ Merge and deduplicate
+        # ----------------------------------------------------------------
+        combined = (seeded or []) + (ai_generated or [])
+        unique = deduplicate_hypotheses(combined)
 
-        print(f"💾 {len(new_hypotheses)} new hypotheses ready for insert.")
-
-        if new_hypotheses:
-            try:
-                res = supabase.table("ai_hypotheses").insert(
-                    new_hypotheses).execute()
-                print("✅ Supabase insert result:", res)
-            except Exception as e:
-                print("❌ Supabase insert failed:", str(e))
-
-        combined = new_hypotheses + seeded
-        print(f"Returning {len(combined)} total hypotheses.")
-        return combined
+        return unique
 
     except Exception as e:
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating hypotheses: {str(e)}"
+        )
