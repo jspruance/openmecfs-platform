@@ -33,7 +33,7 @@ def cosine_sim(a, b):
 
 
 # --------------------------------------------------------------------
-# 🚀 Helper: text normalization for titles
+# 🚀 Helper: normalize title
 # --------------------------------------------------------------------
 def normalize_title(title: str) -> str:
     title = title.lower()
@@ -43,7 +43,7 @@ def normalize_title(title: str) -> str:
 
 
 # --------------------------------------------------------------------
-# 🚀 Combined Hypotheses Endpoint (AI + Non-Destructive Supabase Sync)
+# 🚀 Combined Hypotheses Endpoint (Non-destructive sync + timestamp)
 # --------------------------------------------------------------------
 @router.get("/hypotheses")
 async def get_ai_hypotheses():
@@ -52,7 +52,8 @@ async def get_ai_hypotheses():
       1. Existing hypotheses stored in Supabase (ai_hypotheses table)
       2. New AI-generated hypotheses from paper_summaries
          — with semantic + textual deduplication
-         — and non-destructive Supabase sync (appends new unique ones)
+         — and non-destructive Supabase sync
+         — includes last_synced_at timestamp for each hypothesis
     """
 
     try:
@@ -125,15 +126,17 @@ async def get_ai_hypotheses():
             ai_generated = []
 
         # ----------------------------------------------------------------
-        # 4️⃣ Normalize + assign UUIDs
+        # 4️⃣ Normalize + assign metadata
         # ----------------------------------------------------------------
+        now = datetime.datetime.utcnow().isoformat()
         for h in ai_generated:
             h["id"] = str(uuid.uuid4())
             conf = h.get("confidence", 0.5)
             if not isinstance(conf, (int, float)):
                 conf = 0.5
             h["confidence"] = max(0, min(1, conf))
-            h["created_at"] = datetime.datetime.utcnow().isoformat()
+            h["created_at"] = now
+            h["last_synced_at"] = now
 
         combined = existing + ai_generated
         print(f"DEBUG: Total before dedup: {len(combined)}")
@@ -197,15 +200,17 @@ async def get_ai_hypotheses():
             f"DEBUG: Deduped to {len(unique)} unique hypotheses (threshold=0.88).")
 
         # ----------------------------------------------------------------
-        # 8️⃣ Supabase sync — Non-destructive append
+        # 8️⃣ Supabase sync — Non-destructive append + last_synced_at
         # ----------------------------------------------------------------
         try:
-            print("DEBUG: Syncing new unique hypotheses to Supabase...")
+            print("DEBUG: Syncing deduped hypotheses to Supabase...")
 
             existing_titles = {normalize_title(
                 h["title"]) for h in existing if "title" in h}
             new_unique = [
-                h for h in unique if normalize_title(h["title"]) not in existing_titles
+                {**h, "last_synced_at": now}
+                for h in unique
+                if normalize_title(h["title"]) not in existing_titles
             ]
 
             if new_unique:
