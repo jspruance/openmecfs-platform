@@ -4,6 +4,7 @@ from supabase import create_client, Client
 from openai import OpenAI
 import os
 import uuid
+import traceback
 
 # --------------------------------------------------------------------
 # 🧠 Initialization
@@ -14,6 +15,11 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("❌ Missing Supabase environment variables.")
+if not OPENAI_API_KEY:
+    raise RuntimeError("❌ Missing OpenAI API key.")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -21,7 +27,6 @@ openai = OpenAI(api_key=OPENAI_API_KEY)
 # --------------------------------------------------------------------
 # 🚀 Combined Hypotheses Endpoint
 # --------------------------------------------------------------------
-# ✅ Correct path (prefix /ai will be added in main.py)
 @router.get("/hypotheses")
 async def get_ai_hypotheses():
     """
@@ -29,36 +34,42 @@ async def get_ai_hypotheses():
       1. Seeded hypotheses stored in Supabase (ai_hypotheses table)
       2. Live AI-generated hypotheses derived from paper_summaries
     """
-
     try:
+        print("DEBUG: /ai/hypotheses endpoint hit ✅")
+        print("DEBUG: Supabase URL =", SUPABASE_URL)
+        print("DEBUG: Keys loaded:",
+              bool(SUPABASE_KEY), bool(OPENAI_API_KEY))
+
         # ----------------------------------------------------------------
-        # 1️⃣ Pull existing hypotheses (seeded or previously saved)
+        # 1️⃣ Pull existing (seeded/saved) hypotheses
         # ----------------------------------------------------------------
-        seeded = (
+        seeded_resp = (
             supabase.table("ai_hypotheses")
             .select("*")
             .order("created_at", desc=True)
             .execute()
-            .data
         )
+        seeded = seeded_resp.data or []
+        print(f"DEBUG: Retrieved {len(seeded)} seeded hypotheses.")
 
         # ----------------------------------------------------------------
-        # 2️⃣ Gather recent paper summaries to ground AI reasoning
+        # 2️⃣ Gather recent paper summaries
         # ----------------------------------------------------------------
-        summaries = (
+        summaries_resp = (
             supabase.table("paper_summaries")
             .select("one_sentence")
             .limit(40)
             .execute()
-            .data
         )
+        summaries = summaries_resp.data or []
+        print(f"DEBUG: Retrieved {len(summaries)} paper summaries.")
         if not summaries:
-            return seeded or []
+            return seeded
 
         text_corpus = "\n".join(f"- {s['one_sentence']}" for s in summaries)
 
         # ----------------------------------------------------------------
-        # 3️⃣ Prompt GPT for fresh causal hypotheses
+        # 3️⃣ Ask GPT for new causal hypotheses
         # ----------------------------------------------------------------
         prompt = f"""
         You are a biomedical research AI specializing in ME/CFS.
@@ -77,34 +88,53 @@ async def get_ai_hypotheses():
         {text_corpus}
         """
 
-        completion = openai.responses.create(
-            model="gpt-4.1",
-            input=prompt,
-            response_format={"type": "json"},
-            max_output_tokens=800,
-        )
-
+        print("DEBUG: Sending prompt to OpenAI...")
         try:
+            # For newer OpenAI SDK (>=1.3)
+            completion = openai.responses.create(
+                model="gpt-4.1",
+                input=prompt,
+                response_format={"type": "json"},
+                max_output_tokens=800,
+            )
             ai_generated = completion.output_parsed
-        except Exception:
+        except AttributeError:
+            # Fallback for older SDKs
+            print("⚠️ Fallback: Using chat.completions API instead of responses API.")
+            chat_completion = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            ai_generated = [{"title": "AI hypothesis",
+                             "summary": chat_completion.choices[0].message.content}]
+        except Exception as e:
+            print("ERROR: OpenAI call failed:", str(e))
             ai_generated = []
 
         # ----------------------------------------------------------------
-        # 4️⃣ Normalize data and attach UUIDs
+        # 4️⃣ Normalize + attach UUIDs
         # ----------------------------------------------------------------
         for h in ai_generated:
             h["id"] = str(uuid.uuid4())
-            if "confidence" in h and isinstance(h["confidence"], (int, float)):
-                h["confidence"] = max(0, min(1, h["confidence"]))
-            else:
+            conf = h.get("confidence", 0.5)
+            try:
+                h["confidence"] = max(0, min(1, float(conf)))
+            except Exception:
                 h["confidence"] = 0.5
+
+        print(f"DEBUG: {len(ai_generated)} new hypotheses generated by AI.")
 
         # ----------------------------------------------------------------
         # 5️⃣ Merge both datasets (seeded + AI)
         # ----------------------------------------------------------------
-        combined = (seeded or []) + (ai_generated or [])
+        combined = seeded + ai_generated
+        print(f"DEBUG: Returning total of {len(combined)} hypotheses.")
         return combined
 
     except Exception as e:
+        print("\n" + "=" * 80)
+        print("🔥 ERROR in /ai/hypotheses:")
+        print(traceback.format_exc())
+        print("=" * 80 + "\n")
         raise HTTPException(
             status_code=500, detail=f"Error generating hypotheses: {e}")
