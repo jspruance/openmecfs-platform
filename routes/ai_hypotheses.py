@@ -33,7 +33,7 @@ def cosine_sim(a, b):
 
 
 # --------------------------------------------------------------------
-# 🚀 Helper: basic text normalization for titles
+# 🚀 Helper: text normalization for titles
 # --------------------------------------------------------------------
 def normalize_title(title: str) -> str:
     title = title.lower()
@@ -43,30 +43,30 @@ def normalize_title(title: str) -> str:
 
 
 # --------------------------------------------------------------------
-# 🚀 Combined Hypotheses Endpoint (AI + Supabase Sync)
+# 🚀 Combined Hypotheses Endpoint (AI + Non-Destructive Supabase Sync)
 # --------------------------------------------------------------------
 @router.get("/hypotheses")
 async def get_ai_hypotheses():
     """
     Returns both:
-      1. Seeded hypotheses stored in Supabase (ai_hypotheses table)
-      2. Live AI-generated hypotheses derived from paper_summaries
+      1. Existing hypotheses stored in Supabase (ai_hypotheses table)
+      2. New AI-generated hypotheses from paper_summaries
          — with semantic + textual deduplication
-         — and automatic Supabase upsert (keeps table clean)
+         — and non-destructive Supabase sync (appends new unique ones)
     """
 
     try:
         print("DEBUG: /ai/hypotheses endpoint hit ✅")
 
         # 1️⃣ Pull existing hypotheses
-        seeded = (
+        existing = (
             supabase.table("ai_hypotheses")
             .select("*")
             .order("created_at", desc=True)
             .execute()
             .data
         ) or []
-        print(f"DEBUG: Retrieved {len(seeded)} seeded hypotheses.")
+        print(f"DEBUG: Retrieved {len(existing)} existing hypotheses.")
 
         # 2️⃣ Gather paper summaries
         summaries = (
@@ -79,12 +79,12 @@ async def get_ai_hypotheses():
         print(f"DEBUG: Retrieved {len(summaries)} paper summaries.")
 
         if not summaries:
-            return seeded
+            return existing
 
         text_corpus = "\n".join(f"- {s['one_sentence']}" for s in summaries)
 
         # ----------------------------------------------------------------
-        # 3️⃣ Generate fresh hypotheses via GPT (chat.completions)
+        # 3️⃣ Generate fresh hypotheses via GPT
         # ----------------------------------------------------------------
         prompt = f"""
         You are a biomedical research AI specializing in ME/CFS.
@@ -135,15 +135,15 @@ async def get_ai_hypotheses():
             h["confidence"] = max(0, min(1, conf))
             h["created_at"] = datetime.datetime.utcnow().isoformat()
 
-        all_hypotheses = seeded + ai_generated
-        print(f"DEBUG: Total before dedup: {len(all_hypotheses)}")
+        combined = existing + ai_generated
+        print(f"DEBUG: Total before dedup: {len(combined)}")
 
         # ----------------------------------------------------------------
-        # 5️⃣ Title-based prefilter dedup (lightweight)
+        # 5️⃣ Lightweight title prefilter
         # ----------------------------------------------------------------
         seen_titles = set()
         filtered = []
-        for h in all_hypotheses:
+        for h in combined:
             title_key = normalize_title(h.get("title", ""))
             if any(
                 title_key in t or t in title_key
@@ -154,8 +154,7 @@ async def get_ai_hypotheses():
             seen_titles.add(title_key)
             filtered.append(h)
 
-        print(
-            f"DEBUG: After title prefilter: {len(filtered)} hypotheses remain.")
+        print(f"DEBUG: After title prefilter: {len(filtered)} remain.")
 
         # ----------------------------------------------------------------
         # 6️⃣ Compute embeddings via OpenAI
@@ -172,24 +171,23 @@ async def get_ai_hypotheses():
         embeddings = [d.embedding for d in embedding_response.data]
 
         # ----------------------------------------------------------------
-        # 7️⃣ Semantic deduplication (cosine similarity threshold = 0.88)
+        # 7️⃣ Semantic deduplication (threshold = 0.88)
         # ----------------------------------------------------------------
         unique = []
         seen = []
 
         for i, emb in enumerate(embeddings):
             if not isinstance(emb, (list, np.ndarray)) or len(emb) == 0:
-                continue  # skip invalid embedding
+                continue
 
             duplicate = False
             for seen_emb in seen:
                 try:
-                    sim = cosine_sim(emb, seen_emb)
-                    if sim >= 0.88:
+                    if cosine_sim(emb, seen_emb) >= 0.88:
                         duplicate = True
                         break
                 except Exception:
-                    continue  # skip malformed comparisons
+                    continue
 
             if not duplicate:
                 unique.append(filtered[i])
@@ -199,23 +197,25 @@ async def get_ai_hypotheses():
             f"DEBUG: Deduped to {len(unique)} unique hypotheses (threshold=0.88).")
 
         # ----------------------------------------------------------------
-        # 8️⃣ Supabase sync — overwrite ai_hypotheses table
+        # 8️⃣ Supabase sync — Non-destructive append
         # ----------------------------------------------------------------
         try:
-            print("DEBUG: Syncing deduped hypotheses to Supabase...")
+            print("DEBUG: Syncing new unique hypotheses to Supabase...")
 
-            # Optional: full replace to keep table clean
-            supabase.table("ai_hypotheses").delete().neq(
-                "id", "00000000-0000-0000-0000-000000000000"
-            ).execute()
+            existing_titles = {normalize_title(
+                h["title"]) for h in existing if "title" in h}
+            new_unique = [
+                h for h in unique if normalize_title(h["title"]) not in existing_titles
+            ]
 
-            if unique:
-                supabase.table("ai_hypotheses").insert(unique).execute()
-
-            print("DEBUG: Supabase sync complete ✅")
+            if new_unique:
+                supabase.table("ai_hypotheses").insert(new_unique).execute()
+                print(f"DEBUG: Inserted {len(new_unique)} new hypotheses.")
+            else:
+                print("DEBUG: No new unique hypotheses to insert.")
 
         except Exception as sync_err:
-            print(f"WARNING: Could not sync deduped hypotheses: {sync_err}")
+            print(f"WARNING: Could not sync new hypotheses: {sync_err}")
 
         return unique
 
