@@ -5,6 +5,7 @@ import os
 import uuid
 import numpy as np
 from numpy.linalg import norm
+import datetime
 
 # --------------------------------------------------------------------
 # 🧠 Initialization
@@ -28,7 +29,7 @@ def cosine_sim(a, b):
     return float(np.dot(a, b) / (norm(a) * norm(b)))
 
 # --------------------------------------------------------------------
-# 🚀 Combined Hypotheses Endpoint (with OpenAI-based dedup)
+# 🚀 Combined Hypotheses Endpoint (with OpenAI-based dedup + Supabase sync)
 # --------------------------------------------------------------------
 
 
@@ -39,6 +40,7 @@ async def get_ai_hypotheses():
       1. Seeded hypotheses stored in Supabase (ai_hypotheses table)
       2. Live AI-generated hypotheses derived from paper_summaries
          — with semantic deduplication using OpenAI embeddings
+         — and automatic Supabase upsert (keeps table clean)
     """
 
     try:
@@ -107,6 +109,7 @@ async def get_ai_hypotheses():
             if not isinstance(conf, (int, float)):
                 conf = 0.5
             h["confidence"] = max(0, min(1, conf))
+            h["created_at"] = datetime.datetime.utcnow().isoformat()
 
         all_hypotheses = seeded + ai_generated
         print(f"DEBUG: Total before dedup: {len(all_hypotheses)}")
@@ -137,6 +140,22 @@ async def get_ai_hypotheses():
                 seen.append(emb)
 
         print(f"DEBUG: Deduped to {len(unique)} unique hypotheses.")
+
+        # 7️⃣ Supabase sync — overwrite ai_hypotheses table
+        try:
+            print("DEBUG: Syncing deduped hypotheses to Supabase...")
+            # Clear old rows (optional: comment this out if you prefer append-only)
+            supabase.table("ai_hypotheses").delete().neq(
+                "id", "00000000-0000-0000-0000-000000000000").execute()
+
+            # Bulk insert new clean set
+            if unique:
+                supabase.table("ai_hypotheses").insert(unique).execute()
+            print("DEBUG: Supabase sync complete ✅")
+
+        except Exception as sync_err:
+            print(f"WARNING: Could not sync deduped hypotheses: {sync_err}")
+
         return unique
 
     except Exception as e:
