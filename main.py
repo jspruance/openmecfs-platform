@@ -81,7 +81,7 @@ app.include_router(stats_biomarkers.router)
 app.include_router(graph_global_router)
 app.include_router(biomarkers.router)
 app.include_router(biomarkers_graph.router)
-app.include_router(ai_hypotheses.router)
+app.include_router(ai_hypotheses.router, prefix="/ai", tags=["AI"])
 # ------------------------------------------------------------
 # 🔍 Root Route
 # ------------------------------------------------------------
