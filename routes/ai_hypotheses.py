@@ -5,6 +5,7 @@ import os
 import uuid
 import re
 import json
+from sentence_transformers import SentenceTransformer, util
 
 # --------------------------------------------------------------------
 # 🧠 Initialization
@@ -18,10 +19,14 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
+# Load lightweight embedding model
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # --------------------------------------------------------------------
-# 🔍 Simple text normalization + deduplication
+# 🔍 Text normalization
 # --------------------------------------------------------------------
+
+
 def normalize_title(title: str) -> str:
     if not title:
         return ""
@@ -31,16 +36,39 @@ def normalize_title(title: str) -> str:
     t = re.sub(r"\s+", " ", t)
     return t.strip()
 
+# --------------------------------------------------------------------
+# 🧩 Semantic Deduplication via Embeddings
+# --------------------------------------------------------------------
 
-def deduplicate_hypotheses(hypotheses: list) -> list:
-    seen = set()
-    unique = []
-    for h in hypotheses:
-        key = normalize_title(h.get("title", ""))
-        if key and key not in seen:
-            seen.add(key)
-            unique.append(h)
-    return unique
+
+def deduplicate_semantically(hypotheses, threshold: float = 0.85):
+    if len(hypotheses) <= 1:
+        return hypotheses
+
+    titles = [normalize_title(h.get("title", "")) for h in hypotheses]
+    embeddings = model.encode(
+        titles, convert_to_tensor=True, normalize_embeddings=True)
+
+    keep = []
+    used = set()
+
+    for i, h in enumerate(hypotheses):
+        if i in used:
+            continue
+        group = [i]
+        for j in range(i + 1, len(hypotheses)):
+            if j in used:
+                continue
+            sim = float(util.cos_sim(embeddings[i], embeddings[j]))
+            if sim >= threshold:
+                used.add(j)
+                group.append(j)
+
+        # Keep the first hypothesis in each semantic cluster
+        keep.append(h)
+
+    print(f"🧩 Deduplicated {len(hypotheses)} → {len(keep)} unique hypotheses")
+    return keep
 
 
 # --------------------------------------------------------------------
@@ -52,7 +80,7 @@ async def get_ai_hypotheses():
     Returns both:
       1. Seeded hypotheses stored in Supabase (ai_hypotheses table)
       2. Live AI-generated hypotheses derived from paper_summaries
-         (with deduplication)
+         with semantic deduplication
     """
     try:
         # ----------------------------------------------------------------
@@ -77,7 +105,7 @@ async def get_ai_hypotheses():
             .data
         )
         if not summaries:
-            return deduplicate_hypotheses(seeded or [])
+            return deduplicate_semantically(seeded or [])
 
         text_corpus = "\n".join(f"- {s['one_sentence']}" for s in summaries)
 
@@ -89,7 +117,7 @@ async def get_ai_hypotheses():
         Review the following study summaries and propose 3 new causal hypotheses
         linking biological mechanisms and biomarkers.
 
-        Each hypothesis must be a valid JSON object with:
+        Each hypothesis must be valid JSON with:
           title (string),
           summary (string),
           confidence (float 0–1),
@@ -107,13 +135,12 @@ async def get_ai_hypotheses():
                 {"role": "system", "content": "You are a biomedical AI assistant."},
                 {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_object"},
-            max_tokens=900,
+            temperature=0.3,
         )
 
+        raw = completion.choices[0].message.content.strip()
         try:
-            raw_output = completion.choices[0].message.content
-            ai_generated = json.loads(raw_output)
+            ai_generated = json.loads(raw)
             if isinstance(ai_generated, dict) and "hypotheses" in ai_generated:
                 ai_generated = ai_generated["hypotheses"]
         except Exception:
@@ -131,15 +158,14 @@ async def get_ai_hypotheses():
             )
 
         # ----------------------------------------------------------------
-        # 5️⃣ Merge and deduplicate
+        # 5️⃣ Merge + semantic deduplication
         # ----------------------------------------------------------------
         combined = (seeded or []) + (ai_generated or [])
-        unique = deduplicate_hypotheses(combined)
+        unique = deduplicate_semantically(combined, threshold=0.85)
 
         return unique
 
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Error generating hypotheses: {str(e)}"
+            status_code=500, detail=f"Error generating hypotheses: {e}"
         )
