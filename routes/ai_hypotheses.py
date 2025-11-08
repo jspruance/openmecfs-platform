@@ -5,6 +5,7 @@ from openai import OpenAI
 import os
 import uuid
 import traceback
+import json
 
 # --------------------------------------------------------------------
 # 🧠 Initialization
@@ -23,10 +24,11 @@ if not OPENAI_API_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
-
 # --------------------------------------------------------------------
 # 🚀 Combined Hypotheses Endpoint
 # --------------------------------------------------------------------
+
+
 @router.get("/hypotheses")
 async def get_ai_hypotheses():
     """
@@ -37,31 +39,26 @@ async def get_ai_hypotheses():
     try:
         print("DEBUG: /ai/hypotheses endpoint hit ✅")
         print("DEBUG: Supabase URL =", SUPABASE_URL)
-        print("DEBUG: Keys loaded:",
-              bool(SUPABASE_KEY), bool(OPENAI_API_KEY))
+        print("DEBUG: Keys loaded:", bool(SUPABASE_KEY), bool(OPENAI_API_KEY))
 
-        # ----------------------------------------------------------------
-        # 1️⃣ Pull existing (seeded/saved) hypotheses
-        # ----------------------------------------------------------------
-        seeded_resp = (
+        # 1️⃣ Pull seeded hypotheses
+        seeded = (
             supabase.table("ai_hypotheses")
             .select("*")
             .order("created_at", desc=True)
             .execute()
-        )
-        seeded = seeded_resp.data or []
+            .data
+        ) or []
         print(f"DEBUG: Retrieved {len(seeded)} seeded hypotheses.")
 
-        # ----------------------------------------------------------------
         # 2️⃣ Gather recent paper summaries
-        # ----------------------------------------------------------------
-        summaries_resp = (
+        summaries = (
             supabase.table("paper_summaries")
             .select("one_sentence")
             .limit(40)
             .execute()
-        )
-        summaries = summaries_resp.data or []
+            .data
+        ) or []
         print(f"DEBUG: Retrieved {len(summaries)} paper summaries.")
         if not summaries:
             return seeded
@@ -69,63 +66,69 @@ async def get_ai_hypotheses():
         text_corpus = "\n".join(f"- {s['one_sentence']}" for s in summaries)
 
         # ----------------------------------------------------------------
-        # 3️⃣ Ask GPT for new causal hypotheses
+        # 3️⃣ Ask GPT for new causal hypotheses (universal compatibility)
         # ----------------------------------------------------------------
         prompt = f"""
         You are a biomedical research AI specializing in ME/CFS.
         Review the following study summaries and propose 3 new causal hypotheses
         linking biological mechanisms and biomarkers.
 
-        Each hypothesis must be a valid JSON object with:
-          title (string),
-          summary (string),
-          confidence (float 0–1),
-          mechanisms (array of strings),
-          biomarkers (array of strings),
-          citations (array of short references).
+        Each hypothesis must be valid JSON with fields:
+        - title (string)
+        - summary (string)
+        - confidence (float 0–1)
+        - mechanisms (array of strings)
+        - biomarkers (array of strings)
+        - citations (array of short strings)
+
+        Return a JSON array (not text).
 
         Summaries:
         {text_corpus}
         """
 
         print("DEBUG: Sending prompt to OpenAI...")
+
+        ai_generated = []
         try:
-            # For newer OpenAI SDK (>=1.3)
-            completion = openai.responses.create(
-                model="gpt-4.1",
-                input=prompt,
-                response_format={"type": "json"},
-                max_output_tokens=800,
-            )
-            ai_generated = completion.output_parsed
-        except AttributeError:
-            # Fallback for older SDKs
-            print("⚠️ Fallback: Using chat.completions API instead of responses API.")
-            chat_completion = openai.chat.completions.create(
+            completion = openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
             )
-            ai_generated = [{"title": "AI hypothesis",
-                             "summary": chat_completion.choices[0].message.content}]
+            content = completion.choices[0].message.content.strip()
+            print("DEBUG: Raw OpenAI output (first 200 chars):", content[:200])
+
+            # Try to parse as JSON
+            if content.startswith("{"):
+                ai_generated = [json.loads(content)]
+            elif content.startswith("["):
+                ai_generated = json.loads(content)
+            else:
+                start = content.find("[")
+                end = content.rfind("]")
+                if start != -1 and end != -1:
+                    ai_generated = json.loads(content[start:end+1])
+
         except Exception as e:
-            print("ERROR: OpenAI call failed:", str(e))
+            print("ERROR during OpenAI generation:", str(e))
             ai_generated = []
 
         # ----------------------------------------------------------------
-        # 4️⃣ Normalize + attach UUIDs
+        # 4️⃣ Normalize data + attach UUIDs
         # ----------------------------------------------------------------
         for h in ai_generated:
             h["id"] = str(uuid.uuid4())
-            conf = h.get("confidence", 0.5)
             try:
-                h["confidence"] = max(0, min(1, float(conf)))
+                h["confidence"] = max(
+                    0, min(1, float(h.get("confidence", 0.5))))
             except Exception:
                 h["confidence"] = 0.5
 
         print(f"DEBUG: {len(ai_generated)} new hypotheses generated by AI.")
 
         # ----------------------------------------------------------------
-        # 5️⃣ Merge both datasets (seeded + AI)
+        # 5️⃣ Merge both datasets
         # ----------------------------------------------------------------
         combined = seeded + ai_generated
         print(f"DEBUG: Returning total of {len(combined)} hypotheses.")
