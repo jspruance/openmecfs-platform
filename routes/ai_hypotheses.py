@@ -7,6 +7,7 @@ import numpy as np
 from numpy.linalg import norm
 import datetime
 import json
+import re
 
 # --------------------------------------------------------------------
 # 🧠 Initialization
@@ -26,7 +27,19 @@ openai = OpenAI(api_key=OPENAI_API_KEY)
 # --------------------------------------------------------------------
 def cosine_sim(a, b):
     a, b = np.array(a), np.array(b)
+    if norm(a) == 0 or norm(b) == 0:
+        return 0
     return float(np.dot(a, b) / (norm(a) * norm(b)))
+
+
+# --------------------------------------------------------------------
+# 🚀 Helper: basic text normalization for titles
+# --------------------------------------------------------------------
+def normalize_title(title: str) -> str:
+    title = title.lower()
+    title = re.sub(r"[^a-z0-9\s]", "", title)
+    title = re.sub(r"\s+", " ", title).strip()
+    return title
 
 
 # --------------------------------------------------------------------
@@ -38,7 +51,7 @@ async def get_ai_hypotheses():
     Returns both:
       1. Seeded hypotheses stored in Supabase (ai_hypotheses table)
       2. Live AI-generated hypotheses derived from paper_summaries
-         — with semantic deduplication using OpenAI embeddings
+         — with semantic + textual deduplication
          — and automatic Supabase upsert (keeps table clean)
     """
 
@@ -78,7 +91,7 @@ async def get_ai_hypotheses():
         Review the following study summaries and propose 3 new causal hypotheses
         linking biological mechanisms and biomarkers.
 
-        Each hypothesis must be a valid JSON array of objects with:
+        Each hypothesis must be returned as a JSON array of objects with:
           title (string),
           summary (string),
           confidence (float 0–1),
@@ -126,11 +139,30 @@ async def get_ai_hypotheses():
         print(f"DEBUG: Total before dedup: {len(all_hypotheses)}")
 
         # ----------------------------------------------------------------
-        # 5️⃣ Compute embeddings via OpenAI
+        # 5️⃣ Title-based prefilter dedup (lightweight)
         # ----------------------------------------------------------------
-        titles = [h["title"] for h in all_hypotheses if "title" in h]
+        seen_titles = set()
+        filtered = []
+        for h in all_hypotheses:
+            title_key = normalize_title(h.get("title", ""))
+            if any(
+                title_key in t or t in title_key
+                for t in seen_titles
+                if len(title_key) > 10
+            ):
+                continue
+            seen_titles.add(title_key)
+            filtered.append(h)
+
+        print(
+            f"DEBUG: After title prefilter: {len(filtered)} hypotheses remain.")
+
+        # ----------------------------------------------------------------
+        # 6️⃣ Compute embeddings via OpenAI
+        # ----------------------------------------------------------------
+        titles = [h["title"] for h in filtered if "title" in h]
         if not titles:
-            return all_hypotheses
+            return filtered
 
         embedding_response = openai.embeddings.create(
             model="text-embedding-3-small",
@@ -140,24 +172,34 @@ async def get_ai_hypotheses():
         embeddings = [d.embedding for d in embedding_response.data]
 
         # ----------------------------------------------------------------
-        # 6️⃣ Deduplicate (cosine similarity threshold)
+        # 7️⃣ Semantic deduplication (cosine similarity threshold = 0.88)
         # ----------------------------------------------------------------
         unique = []
         seen = []
+
         for i, emb in enumerate(embeddings):
+            if not isinstance(emb, (list, np.ndarray)) or len(emb) == 0:
+                continue  # skip invalid embedding
+
             duplicate = False
             for seen_emb in seen:
-                if cosine_sim(emb, seen_emb) >= 0.85:
-                    duplicate = True
-                    break
+                try:
+                    sim = cosine_sim(emb, seen_emb)
+                    if sim >= 0.88:
+                        duplicate = True
+                        break
+                except Exception:
+                    continue  # skip malformed comparisons
+
             if not duplicate:
-                unique.append(all_hypotheses[i])
+                unique.append(filtered[i])
                 seen.append(emb)
 
-        print(f"DEBUG: Deduped to {len(unique)} unique hypotheses.")
+        print(
+            f"DEBUG: Deduped to {len(unique)} unique hypotheses (threshold=0.88).")
 
         # ----------------------------------------------------------------
-        # 7️⃣ Supabase sync — overwrite ai_hypotheses table
+        # 8️⃣ Supabase sync — overwrite ai_hypotheses table
         # ----------------------------------------------------------------
         try:
             print("DEBUG: Syncing deduped hypotheses to Supabase...")
