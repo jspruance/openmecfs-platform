@@ -3,10 +3,13 @@ from fastapi import APIRouter, HTTPException
 from supabase import create_client, Client
 from openai import OpenAI
 import os
+import uuid
 
+# --------------------------------------------------------------------
+# 🧠 Initialization
+# --------------------------------------------------------------------
 router = APIRouter()
 
-# Supabase + OpenAI setup
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -15,10 +18,22 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
 
-@router.get("/ai/hypotheses")
+# --------------------------------------------------------------------
+# 🚀 Combined Hypotheses Endpoint
+# --------------------------------------------------------------------
+# ✅ Correct path (prefix /ai will be added in main.py)
+@router.get("/hypotheses")
 async def get_ai_hypotheses():
+    """
+    Returns both:
+      1. Seeded hypotheses stored in Supabase (ai_hypotheses table)
+      2. Live AI-generated hypotheses derived from paper_summaries
+    """
+
     try:
-        # 1️⃣ Pull existing hypotheses (seeded or saved)
+        # ----------------------------------------------------------------
+        # 1️⃣ Pull existing hypotheses (seeded or previously saved)
+        # ----------------------------------------------------------------
         seeded = (
             supabase.table("ai_hypotheses")
             .select("*")
@@ -27,24 +42,36 @@ async def get_ai_hypotheses():
             .data
         )
 
-        # 2️⃣ Fetch recent paper summaries and mechanisms
-        summaries = supabase.table("paper_summaries").select(
-            "one_sentence").limit(40).execute().data
+        # ----------------------------------------------------------------
+        # 2️⃣ Gather recent paper summaries to ground AI reasoning
+        # ----------------------------------------------------------------
+        summaries = (
+            supabase.table("paper_summaries")
+            .select("one_sentence")
+            .limit(40)
+            .execute()
+            .data
+        )
         if not summaries:
             return seeded or []
 
-        text_corpus = "\n".join(
-            [f"- {s['one_sentence']}" for s in summaries]
-        )
+        text_corpus = "\n".join(f"- {s['one_sentence']}" for s in summaries)
 
-        # 3️⃣ Ask GPT to propose new hypotheses
+        # ----------------------------------------------------------------
+        # 3️⃣ Prompt GPT for fresh causal hypotheses
+        # ----------------------------------------------------------------
         prompt = f"""
-        You are an expert biomedical AI analyzing ME/CFS research.
-        Based on the following study summaries, propose 3 causal hypotheses
-        connecting mechanisms and biomarkers.
+        You are a biomedical research AI specializing in ME/CFS.
+        Review the following study summaries and propose 3 new causal hypotheses
+        linking biological mechanisms and biomarkers.
 
-        Return JSON with:
-        title, summary, confidence (0–1), mechanisms[], biomarkers[], citations[].
+        Each hypothesis must be a valid JSON object with:
+          title (string),
+          summary (string),
+          confidence (float 0–1),
+          mechanisms (array of strings),
+          biomarkers (array of strings),
+          citations (array of short references).
 
         Summaries:
         {text_corpus}
@@ -52,8 +79,8 @@ async def get_ai_hypotheses():
 
         completion = openai.responses.create(
             model="gpt-4.1",
-            response_format={"type": "json"},
             input=prompt,
+            response_format={"type": "json"},
             max_output_tokens=800,
         )
 
@@ -62,9 +89,22 @@ async def get_ai_hypotheses():
         except Exception:
             ai_generated = []
 
-        # 4️⃣ Merge both datasets
+        # ----------------------------------------------------------------
+        # 4️⃣ Normalize data and attach UUIDs
+        # ----------------------------------------------------------------
+        for h in ai_generated:
+            h["id"] = str(uuid.uuid4())
+            if "confidence" in h and isinstance(h["confidence"], (int, float)):
+                h["confidence"] = max(0, min(1, h["confidence"]))
+            else:
+                h["confidence"] = 0.5
+
+        # ----------------------------------------------------------------
+        # 5️⃣ Merge both datasets (seeded + AI)
+        # ----------------------------------------------------------------
         combined = (seeded or []) + (ai_generated or [])
         return combined
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, detail=f"Error generating hypotheses: {e}")
