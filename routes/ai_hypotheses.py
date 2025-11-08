@@ -1,47 +1,70 @@
 # routes/ai_hypotheses.py
-from fastapi import APIRouter
-from supabase import create_client
-import os
+from fastapi import APIRouter, HTTPException
+from supabase import create_client, Client
 from openai import OpenAI
+import os
 
 router = APIRouter()
-client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Supabase + OpenAI setup
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+openai = OpenAI(api_key=OPENAI_API_KEY)
 
 
 @router.get("/ai/hypotheses")
-def get_ai_hypotheses():
-    # 1️⃣ Fetch recent summarized papers + mechanisms
-    summaries = client.table("paper_summaries").select("*").execute().data
-    mechanisms = client.table("mechanism_graph").select("*").execute().data
-
-    # 2️⃣ Build a compact prompt for GPT reasoning
-    text_corpus = "\n".join(
-        [f"- {s['one_sentence']}" for s in summaries[:40]]
-    )
-
-    prompt = f"""
-    You are an expert biomedical AI. Analyze the following summaries of ME/CFS studies
-    and propose 3 causal hypotheses linking key mechanisms and biomarkers.
-
-    For each hypothesis, return a JSON object with:
-    title, summary, confidence (0–1), mechanisms[], biomarkers[], citations[].
-
-    Summaries:
-    {text_corpus}
-    """
-
-    # 3️⃣ Generate using GPT
-    completion = openai.responses.create(
-        model="gpt-4.1",
-        response_format={"type": "json"},
-        input=prompt,
-        max_output_tokens=600
-    )
-
+async def get_ai_hypotheses():
     try:
-        hypotheses = completion.output_parsed
-    except Exception:
-        hypotheses = []
+        # 1️⃣ Pull existing hypotheses (seeded or saved)
+        seeded = (
+            supabase.table("ai_hypotheses")
+            .select("*")
+            .order("created_at", desc=True)
+            .execute()
+            .data
+        )
 
-    return hypotheses
+        # 2️⃣ Fetch recent paper summaries and mechanisms
+        summaries = supabase.table("paper_summaries").select(
+            "one_sentence").limit(40).execute().data
+        if not summaries:
+            return seeded or []
+
+        text_corpus = "\n".join(
+            [f"- {s['one_sentence']}" for s in summaries]
+        )
+
+        # 3️⃣ Ask GPT to propose new hypotheses
+        prompt = f"""
+        You are an expert biomedical AI analyzing ME/CFS research.
+        Based on the following study summaries, propose 3 causal hypotheses
+        connecting mechanisms and biomarkers.
+
+        Return JSON with:
+        title, summary, confidence (0–1), mechanisms[], biomarkers[], citations[].
+
+        Summaries:
+        {text_corpus}
+        """
+
+        completion = openai.responses.create(
+            model="gpt-4.1",
+            response_format={"type": "json"},
+            input=prompt,
+            max_output_tokens=800,
+        )
+
+        try:
+            ai_generated = completion.output_parsed
+        except Exception:
+            ai_generated = []
+
+        # 4️⃣ Merge both datasets
+        combined = (seeded or []) + (ai_generated or [])
+        return combined
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
