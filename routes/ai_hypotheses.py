@@ -6,6 +6,7 @@ import uuid
 import numpy as np
 from numpy.linalg import norm
 import datetime
+import json
 
 # --------------------------------------------------------------------
 # 🧠 Initialization
@@ -19,20 +20,18 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 openai = OpenAI(api_key=OPENAI_API_KEY)
 
+
 # --------------------------------------------------------------------
 # 🚀 Helper: cosine similarity
 # --------------------------------------------------------------------
-
-
 def cosine_sim(a, b):
     a, b = np.array(a), np.array(b)
     return float(np.dot(a, b) / (norm(a) * norm(b)))
 
-# --------------------------------------------------------------------
-# 🚀 Combined Hypotheses Endpoint (with OpenAI-based dedup + Supabase sync)
-# --------------------------------------------------------------------
 
-
+# --------------------------------------------------------------------
+# 🚀 Combined Hypotheses Endpoint (AI + Supabase Sync)
+# --------------------------------------------------------------------
 @router.get("/hypotheses")
 async def get_ai_hypotheses():
     """
@@ -71,13 +70,15 @@ async def get_ai_hypotheses():
 
         text_corpus = "\n".join(f"- {s['one_sentence']}" for s in summaries)
 
-        # 3️⃣ Generate fresh hypotheses via GPT
+        # ----------------------------------------------------------------
+        # 3️⃣ Generate fresh hypotheses via GPT (chat.completions)
+        # ----------------------------------------------------------------
         prompt = f"""
         You are a biomedical research AI specializing in ME/CFS.
         Review the following study summaries and propose 3 new causal hypotheses
         linking biological mechanisms and biomarkers.
 
-        Each hypothesis must be a valid JSON object with:
+        Each hypothesis must be a valid JSON array of objects with:
           title (string),
           summary (string),
           confidence (float 0–1),
@@ -89,20 +90,30 @@ async def get_ai_hypotheses():
         {text_corpus}
         """
 
-        completion = openai.responses.create(
-            model="gpt-4.1",
-            input=prompt,
-            response_format={"type": "json"},
-            max_output_tokens=800,
-        )
-
         try:
-            ai_generated = completion.output_parsed
+            completion = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a biomedical AI researcher."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.4,
+            )
+
+            content = completion.choices[0].message.content.strip()
+            ai_generated = json.loads(content)
+            print(f"DEBUG: GPT returned {len(ai_generated)} raw hypotheses.")
+
+        except json.JSONDecodeError:
+            print("WARNING: GPT output was not valid JSON — skipping parse.")
+            ai_generated = []
         except Exception as e:
-            print(f"ERROR: Failed to parse GPT output: {e}")
+            print(f"ERROR: GPT generation failed: {e}")
             ai_generated = []
 
+        # ----------------------------------------------------------------
         # 4️⃣ Normalize + assign UUIDs
+        # ----------------------------------------------------------------
         for h in ai_generated:
             h["id"] = str(uuid.uuid4())
             conf = h.get("confidence", 0.5)
@@ -114,7 +125,9 @@ async def get_ai_hypotheses():
         all_hypotheses = seeded + ai_generated
         print(f"DEBUG: Total before dedup: {len(all_hypotheses)}")
 
+        # ----------------------------------------------------------------
         # 5️⃣ Compute embeddings via OpenAI
+        # ----------------------------------------------------------------
         titles = [h["title"] for h in all_hypotheses if "title" in h]
         if not titles:
             return all_hypotheses
@@ -126,7 +139,9 @@ async def get_ai_hypotheses():
 
         embeddings = [d.embedding for d in embedding_response.data]
 
+        # ----------------------------------------------------------------
         # 6️⃣ Deduplicate (cosine similarity threshold)
+        # ----------------------------------------------------------------
         unique = []
         seen = []
         for i, emb in enumerate(embeddings):
@@ -141,16 +156,20 @@ async def get_ai_hypotheses():
 
         print(f"DEBUG: Deduped to {len(unique)} unique hypotheses.")
 
+        # ----------------------------------------------------------------
         # 7️⃣ Supabase sync — overwrite ai_hypotheses table
+        # ----------------------------------------------------------------
         try:
             print("DEBUG: Syncing deduped hypotheses to Supabase...")
-            # Clear old rows (optional: comment this out if you prefer append-only)
-            supabase.table("ai_hypotheses").delete().neq(
-                "id", "00000000-0000-0000-0000-000000000000").execute()
 
-            # Bulk insert new clean set
+            # Optional: full replace to keep table clean
+            supabase.table("ai_hypotheses").delete().neq(
+                "id", "00000000-0000-0000-0000-000000000000"
+            ).execute()
+
             if unique:
                 supabase.table("ai_hypotheses").insert(unique).execute()
+
             print("DEBUG: Supabase sync complete ✅")
 
         except Exception as sync_err:
