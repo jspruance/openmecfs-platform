@@ -5,7 +5,7 @@ from utils.db import _search_cache
 
 router = APIRouter(prefix="/cache", tags=["cache"])
 
-# Optional admin token (only enforced in production)
+# Optional admin token (only enforced in production env)
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
 
 
